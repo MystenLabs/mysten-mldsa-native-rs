@@ -1,4 +1,4 @@
-// Copyright (c) 2026, Mysten Labs, Inc.
+// Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 #![warn(
     future_incompatible,
@@ -72,16 +72,12 @@ pub const SIGNATURE_LENGTH: usize = sys::MLDSA65_BYTES;
 const EMPTY_CONTEXT_PREFIX: [u8; 2] = [0x00, 0x00];
 
 /// The error type of this crate.
-///
-/// Verification failures are deliberately unclassified: the C backend returns a single
-/// failure code for malformed encodings and ordinary mismatches alike, and this crate does
-/// not invent a taxonomy it cannot obtain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
-    /// The input has a length other than the single valid length for its type.
+    /// Invalid parameter length
     InvalidLength,
-    /// The signature did not verify under the given public key and message.
+    /// Invalid signature
     InvalidSignature,
 }
 
@@ -125,11 +121,6 @@ impl SigningKey {
     }
 
     /// Generate a signing key from a fresh 32-byte seed drawn from the operating system.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the operating system's entropy source fails, which on supported platforms
-    /// indicates a broken environment rather than a recoverable condition.
     #[cfg(feature = "rand")]
     pub fn generate() -> Self {
         let mut seed = [0u8; SEED_LENGTH];
@@ -139,15 +130,12 @@ impl SigningKey {
         key
     }
 
-    /// The 32-byte FIPS 204 seed `/Xi` this key was expanded from — the private key's one and
-    /// only serialized form.
+    /// The 32-byte FIPS 204 seed `/Xi` this key was expanded from
     pub fn seed(&self) -> &[u8; SEED_LENGTH] {
         &self.seed
     }
 
     /// The public key derived from this signing key.
-    ///
-    /// A copy of the cache produced at construction, not a key generation.
     pub fn verifying_key(&self) -> VerifyingKey {
         VerifyingKey(
             self.public
@@ -163,11 +151,6 @@ impl SigningKey {
     /// `rnd` must be fresh randomness for every signature to get the hedged variant's
     /// resistance to fault attacks and randomness reuse; all-zero `rnd` yields FIPS 204's
     /// deterministic variant. `rnd` does not need to be kept secret, so it is not zeroized.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the backend rejects the signing request, which is reachable only through
-    /// rejection-sampling exhaustion at probability below 2^-256.
     pub fn sign(&self, message: &[u8], rnd: &[u8; RND_LENGTH]) -> Signature {
         let mut sig = [0u8; SIGNATURE_LENGTH];
         let rc = unsafe {
@@ -187,11 +170,6 @@ impl SigningKey {
     }
 
     /// Sign `message` with fresh hedging randomness drawn from the operating system.
-    ///
-    /// # Panics
-    ///
-    /// Panics under the same conditions as [`SigningKey::generate`] and
-    /// [`SigningKey::sign`].
     #[cfg(feature = "rand")]
     pub fn sign_randomized(&self, message: &[u8]) -> Signature {
         let mut rnd = [0u8; RND_LENGTH];
@@ -212,15 +190,12 @@ impl zeroize::ZeroizeOnDrop for SigningKey {}
 
 impl PartialEq for SigningKey {
     fn eq(&self, other: &Self) -> bool {
-        // The caches are derived from the seed, so seed equality is key equality.
         self.seed == other.seed
     }
 }
 
 impl Eq for SigningKey {}
 
-// Never expose key material through formatting; the seed is reachable only through the
-// explicit `seed()` accessor.
 impl fmt::Debug for SigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "SigningKey(<redacted>)")
@@ -233,10 +208,6 @@ pub struct VerifyingKey([u8; PUBLIC_KEY_LENGTH]);
 
 impl VerifyingKey {
     /// Parse a public key from exactly [`PUBLIC_KEY_LENGTH`] bytes.
-    ///
-    /// Length is the only possible check: every 1952-byte string decodes to a well-formed
-    /// ML-DSA-65 public key, so a successful parse says nothing about whether anyone holds
-    /// the matching private key.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         bytes
             .try_into()
@@ -249,8 +220,7 @@ impl VerifyingKey {
         &self.0
     }
 
-    /// Verify `signature` over `message` under this key (FIPS 204 Algorithm 3, context
-    /// fixed to empty).
+    /// Verify `signature` over `message` under this key (FIPS 204 Algorithm 3, context fixed to empty).
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         // NULL/0 is upstream's documented encoding of the (fixed empty) context.
         let rc = unsafe {
@@ -294,9 +264,6 @@ pub struct Signature([u8; SIGNATURE_LENGTH]);
 
 impl Signature {
     /// Parse a signature from exactly [`SIGNATURE_LENGTH`] bytes.
-    ///
-    /// Only length is checked here; whether the bytes form a valid, canonically encoded
-    /// signature is decided by [`VerifyingKey::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         bytes
             .try_into()

@@ -81,13 +81,17 @@ small enough to audit in one sitting.
 
 ## Development
 
-Before pushing:
+The toolchain is pinned by `rust-toolchain`. Before pushing:
 
 ```bash
 cargo test --all-features
 cargo fmt --all --check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo xclippy -D warnings   # project clippy alias, see .cargo/config.toml
+scripts/license_check.sh
+cargo deny check            # needs cargo-deny installed
 ```
+
+Vulnerabilities: see `SECURITY.md` — do not open public issues.
 
 ## License
 

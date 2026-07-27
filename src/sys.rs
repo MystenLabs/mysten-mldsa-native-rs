@@ -1,4 +1,4 @@
-// Copyright (c) 2026, Mysten Labs, Inc.
+// Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 //! Raw FFI bindings to mldsa-native's ML-DSA-65 `_internal` API (see `../PROVENANCE.md`).
