@@ -159,17 +159,15 @@ fn debug_output_is_redacted() {
 
 #[test]
 fn seed_is_zeroized_on_drop() {
-    let ptr: *const u8;
-    {
-        let sk = SigningKey::from_seed(&[13u8; SEED_LENGTH]);
-        ptr = sk.seed().as_ptr();
-        let live = unsafe { std::slice::from_raw_parts(ptr, SEED_LENGTH) };
-        assert_eq!(live, &[13u8; SEED_LENGTH]);
-    } // drops in place; Drop zeroizes every field before the stack slot is reused.
+    let mut sk = std::mem::ManuallyDrop::new(SigningKey::from_seed(&[13u8; SEED_LENGTH]));
+    let ptr = sk.seed().as_ptr();
+    assert_eq!(sk.seed(), &[13u8; SEED_LENGTH]);
 
-    // Only the inline seed is observable after the drop: the boxed caches are wiped by the
-    // same Drop, but their heap blocks return to the allocator immediately. Mirrors the
-    // zeroization tests in fastcrypto.
+    unsafe {
+        std::ptr::drop_in_place(&mut *sk as *mut SigningKey);
+    }
+
+    // Only the inline seed is observable after the drop
     unsafe {
         for i in 0..SEED_LENGTH {
             assert_eq!(*ptr.add(i), 0, "seed byte {i} not zeroized");

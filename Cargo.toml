@@ -6,6 +6,7 @@ license = "Apache-2.0"
 authors = ["Mysten Labs <build@mystenlabs.com>"]
 description = "Minimal safe Rust wrapper around the mldsa-native ML-DSA-65 (FIPS 204) implementation"
 readme = "README.md"
+repository = "https://github.com/MystenLabs/mysten-mldsa-native-rs"
 
 links = "mldsa65"
 # The include list keeps `cargo package` down to the sources the build actually consumes
@@ -20,8 +21,7 @@ include = [
 ]
 
 [features]
-# Off by default: the core crate takes all randomness as explicit arguments and contains no
-# entropy source.
+# Off by default: the core crate takes all randomness as explicit arguments and contains no entropy source.
 rand = ["dep:getrandom"]
 
 [dependencies]

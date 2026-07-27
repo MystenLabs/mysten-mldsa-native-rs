@@ -81,7 +81,7 @@ small enough to audit in one sitting.
 
 ## Development
 
-The toolchain is pinned by `rust-toolchain`. Before pushing:
+The toolchain is pinned by `rust-toolchain.toml`. Before pushing:
 
 ```bash
 cargo test --all-features
