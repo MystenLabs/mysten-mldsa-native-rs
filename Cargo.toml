@@ -20,13 +20,8 @@ include = [
     "/deps/mldsa-native/LICENSE",
 ]
 
-[features]
-# Off by default: the core crate takes all randomness as explicit arguments and contains no entropy source.
-rand = ["dep:getrandom"]
-
 [dependencies]
 zeroize = "1"
-getrandom = { version = "0.3", optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"

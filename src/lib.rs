@@ -11,29 +11,32 @@
 //! Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA-65 (FIPS 204) implementation.
 //!
 //! The C library (a CBMC-verified C90 implementation maintained by the Post-Quantum
-//! Cryptography Alliance, and the code AWS-LC and liboqs import) is vendored as a git
-//! submodule and compiled by `build.rs`; see `PROVENANCE.md` for the exact pin. This crate
-//! deliberately exposes a small, opinionated surface:
+//! Cryptography Alliance) is vendored as a git submodule and compiled by `build.rs`;
+//! see `PROVENANCE.md` for the exact pin. This crate deliberately exposes a small, opinionated surface:
 //!
-//! - **The private key is the 32-byte FIPS 204 seed `/Xi`.** [`SigningKey`] retains the seed
-//!   and exposes it via [`SigningKey::seed`]; the 4032-byte expanded signing key is an
-//!   internal cache derived once at construction and is never exported. Key expansion is
-//!   fully specified by FIPS 204 Algorithm 6, so the same seed yields the same key pair in
-//!   every conforming implementation.
-//! - **All randomness enters as explicit arguments.** [`SigningKey::sign`] takes the 32
-//!   bytes of hedging randomness from the caller, and the C is compiled with its
-//!   self-randomizing entry points removed, so no code path exists in which the library
-//!   sources entropy. The optional `rand` feature adds OS-randomness conveniences on top.
-//! - **The FIPS 204 context string is fixed to empty.** Context-string support can be added
-//!   later as new methods without breaking this API.
-//! - **Strict fixed-length parsing.** [`VerifyingKey::from_bytes`] and
+//! - Two signing key forms. [`SigningKeySeed`] is the 32-byte FIPS 204 seed `/Xi`, the
+//!   storage and wire form. [`SigningKeySeed::expand`] derives the operational
+//!   [`SigningKey`] (where [`SigningKey::sign`] lives) together with the corresponding
+//!   [`VerifyingKey`]. Key expansion is fully specified by FIPS 204 Algorithm 6, so the
+//!   same seed yields the same key pair in every compliant implementation. Consumers pick
+//!   the space-time trade-off: store seeds and expand on demand, or keep expanded keys
+//!   around.
+//! - No entropy source in the library. The C is compiled with `MLD_CONFIG_NO_RANDOMIZED_API`,
+//!   so its self-randomizing entry points do not exist and
+//!   no `randombytes` symbol is required or referenced at link time. All randomness enters
+//!   as explicit arguments: the seed for key generation, `rnd` for hedged signing.
+//! - The FIPS 204 context string is a parameter. `sign` and `verify` take `ctx`
+//!   (at most [`MAX_CONTEXT_LENGTH`] bytes); consumers that need no domain separation pass
+//!   the default empty string.
+//! - Strict fixed-length parsing. [`VerifyingKey::from_bytes`] and
 //!   [`Signature::from_bytes`] accept exactly [`PUBLIC_KEY_LENGTH`] and
 //!   [`SIGNATURE_LENGTH`] bytes.
-//! - Secret material (seed and expanded key) is zeroized on drop, and [`SigningKey`]'s
-//!   `Debug` output is redacted.
+//! - Secret material is zeroized on drop, and the signing key types' `Debug` output is
+//!   redacted. The expanded and public keys are heap-allocated so the C writes them at
+//!   their final address and moves of the key never copy secret bytes.
 //!
 //! ```rust
-//! use mysten_mldsa_native_rs::{SigningKey, RND_LENGTH, SEED_LENGTH};
+//! use mysten_mldsa_native_rs::{SigningKeySeed, RND_LENGTH, SEED_LENGTH};
 //!
 //! const MSG: &str = "00010203";
 //! const SEED: &str = "0101010101010101010101010101010101010101010101010101010101010101";
@@ -41,10 +44,10 @@
 //! let seed: [u8; SEED_LENGTH] = hex::decode(SEED).unwrap().try_into().unwrap();
 //! let msg = hex::decode(MSG).unwrap();
 //!
-//! let sk = SigningKey::from_seed(&seed);
+//! let (sk, vk) = SigningKeySeed::from(seed).expand();
 //! let rnd = [42u8; RND_LENGTH]; // draw fresh from the OS per signature in real use
-//! let sig = sk.sign(&msg, &rnd);
-//! assert!(sk.verifying_key().verify(&msg, &sig).is_ok());
+//! let sig = sk.sign(&msg, b"", &rnd).unwrap();
+//! assert!(vk.verify(&msg, b"", &sig).is_ok());
 //! ```
 //!
 //! [mldsa-native]: https://github.com/pq-code-package/mldsa-native
@@ -65,11 +68,8 @@ pub const PUBLIC_KEY_LENGTH: usize = sys::MLDSA65_PUBLICKEYBYTES;
 /// The length of a signature in bytes.
 pub const SIGNATURE_LENGTH: usize = sys::MLDSA65_BYTES;
 
-/// FIPS 204's pure-ML-DSA message prefix for the empty context: the domain separator 0x00
-/// followed by the context length 0. The context is fixed to empty in this crate; a
-/// different prefix would produce signatures incompatible with every verifier built from
-/// this crate, so it is deliberately not exposed as a parameter.
-const EMPTY_CONTEXT_PREFIX: [u8; 2] = [0x00, 0x00];
+/// The maximum length of the FIPS 204 context string in bytes.
+pub const MAX_CONTEXT_LENGTH: usize = 255;
 
 /// The error type of this crate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +79,8 @@ pub enum Error {
     InvalidLength,
     /// Invalid signature
     InvalidSignature,
+    /// Context string longer than [`MAX_CONTEXT_LENGTH`] bytes
+    ContextTooLong,
 }
 
 impl fmt::Display for Error {
@@ -86,115 +88,140 @@ impl fmt::Display for Error {
         match self {
             Error::InvalidLength => write!(f, "input has an invalid length"),
             Error::InvalidSignature => write!(f, "signature verification failed"),
+            Error::ContextTooLong => write!(f, "context string exceeds 255 bytes"),
         }
     }
 }
 
 impl std::error::Error for Error {}
 
-/// An ML-DSA-65 signing key.
+/// Build the FIPS 204 pure-ML-DSA message prefix `0x00 || ctxlen || ctx`. The C validates
+/// the context length only on the verify path, so our signing path enforces it here.
+fn domain_separation_prefix(ctx: &[u8]) -> Result<([u8; 2 + MAX_CONTEXT_LENGTH], usize), Error> {
+    if ctx.len() > MAX_CONTEXT_LENGTH {
+        return Err(Error::ContextTooLong);
+    }
+    let mut prefix = [0u8; 2 + MAX_CONTEXT_LENGTH];
+    prefix[1] = ctx.len() as u8;
+    prefix[2..2 + ctx.len()].copy_from_slice(ctx);
+    Ok((prefix, 2 + ctx.len()))
+}
+
+/// An ML-DSA-65 signing key seed: the 32-byte FIPS 204 seed `/Xi`, the storage and wire
+/// form of a private key. Zeroized on drop.
+#[derive(PartialEq, Eq)]
+pub struct SigningKeySeed([u8; SEED_LENGTH]);
+
+impl SigningKeySeed {
+    /// Parse a seed from exactly [`SEED_LENGTH`] bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        bytes
+            .try_into()
+            .map(SigningKeySeed)
+            .map_err(|_| Error::InvalidLength)
+    }
+
+    /// The seed bytes, the private key's one and only serialized form.
+    pub fn as_bytes(&self) -> &[u8; SEED_LENGTH] {
+        &self.0
+    }
+
+    /// Expand into the operational [`SigningKey`] and its [`VerifyingKey`] via
+    /// ML-DSA.KeyGen_internal (FIPS 204 Algorithm 6). The public key is a byproduct of the
+    /// same expansion, so both cost one keygen, about as much as signing (~150 microseconds);
+    /// callers that sign repeatedly are recommended to keep the expanded key instead of
+    /// reexpanding it.
+    pub fn expand(&self) -> (SigningKey, VerifyingKey) {
+        let mut public = [0u8; PUBLIC_KEY_LENGTH];
+        let mut expanded = vec![0u8; sys::MLDSA65_SECRETKEYBYTES].into_boxed_slice();
+        let rc = unsafe {
+            sys::mldsa65_keypair_internal(
+                public.as_mut_ptr(),
+                expanded.as_mut_ptr(),
+                self.0.as_ptr(),
+            )
+        };
+        assert_eq!(rc, 0, "ML-DSA-65 key expansion failed");
+        (SigningKey { expanded }, VerifyingKey(public))
+    }
+}
+
+impl From<[u8; SEED_LENGTH]> for SigningKeySeed {
+    fn from(seed: [u8; SEED_LENGTH]) -> Self {
+        SigningKeySeed(seed)
+    }
+}
+
+impl AsRef<[u8]> for SigningKeySeed {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Drop for SigningKeySeed {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for SigningKeySeed {}
+
+impl fmt::Debug for SigningKeySeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SigningKeySeed(<redacted>)")
+    }
+}
+
+/// An ML-DSA-65 operational signing key: the expanded signing key derived from a
+/// [`SigningKeySeed`], which also yields the corresponding [`VerifyingKey`]. Does not
+/// retain the seed or the public key and has no serialized form; serialize the seed
+/// instead. Zeroized on drop.
 ///
-/// Constructed from, serialized as, and equal to its 32-byte FIPS 204 seed; the expanded
-/// signing key and the encoded public key are caches computed once at construction so that
-/// signing and public-key derivation never re-run key generation (~150 microseconds). All three
-/// fields are zeroized on drop.
+/// The field is heap-allocated so the C writes it at its final address and moves of the
+/// key never copy secret bytes onto the stack.
 pub struct SigningKey {
-    seed: [u8; SEED_LENGTH],
     expanded: Box<[u8]>,
-    public: Box<[u8]>,
 }
 
 impl SigningKey {
-    /// Expand `seed` into a signing key via ML-DSA.KeyGen_internal (FIPS 204 Algorithm 6).
-    pub fn from_seed(seed: &[u8; SEED_LENGTH]) -> Self {
-        let mut public = vec![0u8; PUBLIC_KEY_LENGTH].into_boxed_slice();
-        let mut expanded = vec![0u8; sys::MLDSA65_SECRETKEYBYTES].into_boxed_slice();
-        let rc = unsafe {
-            sys::mldsa65_keypair_internal(public.as_mut_ptr(), expanded.as_mut_ptr(), seed.as_ptr())
-        };
-        assert_eq!(rc, 0, "ML-DSA-65 key expansion failed");
-        SigningKey {
-            seed: *seed,
-            expanded,
-            public,
-        }
-    }
-
-    /// Generate a signing key from a fresh 32-byte seed drawn from the operating system.
-    #[cfg(feature = "rand")]
-    pub fn generate() -> Self {
-        let mut seed = [0u8; SEED_LENGTH];
-        getrandom::fill(&mut seed).expect("OS entropy source failed");
-        let key = Self::from_seed(&seed);
-        seed.zeroize();
-        key
-    }
-
-    /// The 32-byte FIPS 204 seed `/Xi` this key was expanded from
-    pub fn seed(&self) -> &[u8; SEED_LENGTH] {
-        &self.seed
-    }
-
-    /// The public key derived from this signing key.
-    pub fn verifying_key(&self) -> VerifyingKey {
-        VerifyingKey(
-            self.public
-                .as_ref()
-                .try_into()
-                .expect("cache has the fixed public key length"),
-        )
-    }
-
-    /// Sign `message` with the caller-supplied hedging randomness `rnd` (FIPS 204
-    /// Algorithm 2 with the context fixed to empty).
+    /// Sign `message` under the context string `ctx` with the caller-supplied hedging
+    /// randomness `rnd` (FIPS 204 Algorithm 2).
     ///
     /// `rnd` must be fresh randomness for every signature to get the hedged variant's
     /// resistance to fault attacks and randomness reuse; all-zero `rnd` yields FIPS 204's
     /// deterministic variant. `rnd` does not need to be kept secret, so it is not zeroized.
-    pub fn sign(&self, message: &[u8], rnd: &[u8; RND_LENGTH]) -> Signature {
+    pub fn sign(
+        &self,
+        message: &[u8],
+        ctx: &[u8],
+        rnd: &[u8; RND_LENGTH],
+    ) -> Result<Signature, Error> {
+        let (prefix, prefix_len) = domain_separation_prefix(ctx)?;
         let mut sig = [0u8; SIGNATURE_LENGTH];
         let rc = unsafe {
             sys::mldsa65_signature_internal(
                 sig.as_mut_ptr(),
                 message.as_ptr(),
                 message.len(),
-                EMPTY_CONTEXT_PREFIX.as_ptr(),
-                EMPTY_CONTEXT_PREFIX.len(),
+                prefix.as_ptr(),
+                prefix_len,
                 rnd.as_ptr(),
                 self.expanded.as_ptr(),
                 0,
             )
         };
         assert_eq!(rc, 0, "ML-DSA-65 signing failed");
-        Signature(sig)
-    }
-
-    /// Sign `message` with fresh hedging randomness drawn from the operating system.
-    #[cfg(feature = "rand")]
-    pub fn sign_randomized(&self, message: &[u8]) -> Signature {
-        let mut rnd = [0u8; RND_LENGTH];
-        getrandom::fill(&mut rnd).expect("OS entropy source failed");
-        self.sign(message, &rnd)
+        Ok(Signature(sig))
     }
 }
 
 impl Drop for SigningKey {
     fn drop(&mut self) {
-        self.seed.zeroize();
         self.expanded.zeroize();
-        self.public.zeroize();
     }
 }
 
 impl zeroize::ZeroizeOnDrop for SigningKey {}
-
-impl PartialEq for SigningKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.seed == other.seed
-    }
-}
-
-impl Eq for SigningKey {}
 
 impl fmt::Debug for SigningKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -220,16 +247,18 @@ impl VerifyingKey {
         &self.0
     }
 
-    /// Verify `signature` over `message` under this key (FIPS 204 Algorithm 3, context fixed to empty).
-    pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
-        // NULL/0 is upstream's documented encoding of the (fixed empty) context.
+    /// Verify `signature` over `message` under the context string `ctx` (FIPS 204 Algorithm 3).
+    pub fn verify(&self, message: &[u8], ctx: &[u8], signature: &Signature) -> Result<(), Error> {
+        if ctx.len() > MAX_CONTEXT_LENGTH {
+            return Err(Error::ContextTooLong);
+        }
         let rc = unsafe {
             sys::mldsa65_verify(
                 signature.0.as_ptr(),
                 message.as_ptr(),
                 message.len(),
-                std::ptr::null(),
-                0,
+                ctx.as_ptr(),
+                ctx.len(),
                 self.0.as_ptr(),
             )
         };
