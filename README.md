@@ -8,17 +8,18 @@ as the consumer can wrap these types and implement their own traits on top.
 
 ## Design decisions
 
-- **The private key is the 32-byte FIPS 204 seed `/Xi`.** `SigningKey` retains the seed and
-  exposes it; the 4032-byte expanded signing key is an internal cache, never a wire
-  format. FIPS 204 fixes the seed -> key expansion, so the same seed yields the same key
-  pair in every compliant implementation.
+- **Two signing key forms.** `SigningKeySeed` is the 32-byte FIPS 204 seed `/Xi` — the
+  storage and wire form. `SigningKeySeed::expand` derives the operational `SigningKey`
+  (4032-byte expanded key plus 1952-byte public key), where `sign` lives. FIPS 204 fixes
+  the seed -> key expansion, so the same seed yields the same key pair in every compliant
+  implementation. Consumers pick the space-time trade-off: store seeds and expand on
+  demand, or keep expanded keys around.
 - **No entropy source in the library.** The C is compiled with
   `MLD_CONFIG_NO_RANDOMIZED_API`, so its self-randomizing entry points do not exist and
   no `randombytes` symbol is required or referenced at link time. All randomness enters
-  as explicit arguments (`sign(message, rnd)`); the optional off-by-default `rand`
-  feature adds OS-randomness conveniences backed directly by `getrandom`.
-- **The FIPS 204 context string is fixed to empty.** Context support can be added later
-  as new methods without breaking this API.
+  as explicit arguments: the seed for key generation, `rnd` for hedged signing.
+- **The FIPS 204 context string is a parameter** (at most 255 bytes) on `sign` and
+  `verify`; consumers that need no domain separation pass the empty string.
 - **Strict fixed-length parsing**, and verification rejects non-canonical signature
   encodings (enforced inside the verified C); a valid ML-DSA-65 signature has exactly
   one byte encoding.
@@ -31,13 +32,12 @@ as the consumer can wrap these types and implement their own traits on top.
   second copy of the C library.
 - **Secret hygiene**: seed and expanded key are zeroized on drop; `SigningKey`'s `Debug`
   is redacted.
-- Runtime dependencies: `zeroize` (plus `getrandom` under the `rand` feature). Build
-  dependency: `cc`.
+- Runtime dependency: `zeroize`. Build dependency: `cc`.
 
 ## Usage
 
 ```rust
-use mysten_mldsa_native_rs::{SigningKey, RND_LENGTH, SEED_LENGTH};
+use mysten_mldsa_native_rs::{SigningKeySeed, RND_LENGTH, SEED_LENGTH};
 
 const MSG: &str = "00010203";
 const SEED: &str = "0101010101010101010101010101010101010101010101010101010101010101";
@@ -45,10 +45,10 @@ const SEED: &str = "010101010101010101010101010101010101010101010101010101010101
 let seed: [u8; SEED_LENGTH] = hex::decode(SEED).unwrap().try_into().unwrap();
 let msg = hex::decode(MSG).unwrap();
 
-let sk = SigningKey::from_seed(&seed);
+let sk = SigningKeySeed::from(seed).expand();
 let rnd = [42u8; RND_LENGTH]; // draw fresh from the OS per signature in real use
-let sig = sk.sign(&msg, &rnd);
-assert!(sk.verifying_key().verify(&msg, &sig).is_ok());
+let sig = sk.sign(&msg, b"", &rnd).unwrap();
+assert!(sk.verifying_key().verify(&msg, b"", &sig).is_ok());
 ```
 
 The same example runs as the crate's doctest, so it cannot drift from the API.

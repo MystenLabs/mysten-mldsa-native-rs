@@ -48,7 +48,7 @@ extern "C" {
     ///
     /// `sig` must point to `MLDSA65_BYTES` bytes (fixed length; no output-length parameter).
     /// `pre` is the caller-constructed FIPS 204 message-prefix (`0x00 || ctxlen || ctx` for pure
-    /// ML-DSA) and is not validated here — the C enforces `ctxlen <= 255` only on the verify
+    /// ML-DSA) and is not validated here; the C enforces `ctxlen <= 255` only on the verify
     /// path, so the signing caller owns that check. `rnd` is `MLDSA_RNDBYTES` of fresh
     /// randomness for hedged signing. `sk` must point to `MLDSA65_SECRETKEYBYTES` bytes and is
     /// assumed valid (mldsa-native does not validate secret keys on the signing path). Returns 0
