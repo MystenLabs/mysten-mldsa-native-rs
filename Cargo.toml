@@ -20,6 +20,13 @@ include = [
     "/deps/mldsa-native/LICENSE",
 ]
 
+[features]
+# Compiles mldsa-native's formally verified assembly backends instead of the portable C.
+# aarch64/NEON and x86_64/AVX2; identical outputs. On x86_64 a runtime CPU probe gates
+# the backend per machine and falls back to portable C without AVX2; see build.rs for how
+# the AVX2 code is kept out of the compiler's hands.
+native = []
+
 [dependencies]
 zeroize = "1"
 

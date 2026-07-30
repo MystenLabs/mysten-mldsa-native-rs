@@ -1,6 +1,6 @@
 # mysten-mldsa-native-rs
 
-Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA-65 (FIPS 204) implementation —
+Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA-65 (FIPS 204) implementation -
 the CBMC-verified C90 code maintained by the Post-Quantum Cryptography Alliance, Linux Foundation.
 
 This crate is the scheme-agnostic middle layer: It is designed to be consumer-agnostic (e.g. MystenLabs' fastcrypto), 
@@ -64,8 +64,14 @@ git submodule update --init
 cargo test
 ```
 
-A C compiler is required; the portable C backend builds on every target (the verified
-AVX2/NEON backends are a possible future addition behind the same API).
+A C compiler is required; the default build compiles the portable C backend, which
+works on every target. The `native` cargo feature swaps in the formally verified
+assembly backends behind the same API: NEON on aarch64 (selected at compile time),
+AVX2 on x86_64 (gated per machine by a runtime CPU probe, with automatic fallback to
+the portable C on CPUs without AVX2). Outputs are identical across backends, and the
+pinned test vectors verify that. On other architectures, and on toolchains the
+assembly does not support (MSVC), the feature falls back to the portable C with a
+build warning.
 
 ## Relation to mldsa-native-rs
 
