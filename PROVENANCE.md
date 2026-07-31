@@ -32,7 +32,7 @@ git submodule update --init
 cd deps/mldsa-native
 git fetch origin
 git checkout <new-commit-or-tag>
-# The new pin must be reachable from upstream main — never a PR or fork commit:
+# The new pin must be reachable from upstream main - never a PR or fork commit:
 git branch -r --contains HEAD | grep -q origin/main
 git describe --tags
 cd ../..
@@ -42,7 +42,7 @@ git add deps/mldsa-native
 Then update the commit hash, date, and `git describe` string above, confirm the
 "local modifications: none" statement still holds, and re-run the full test
 suite. A prototype or size change upstream fails the build via
-`src/abi_check.c` — resolve it by updating `src/sys.rs` and `abi_check.c`
+`src/abi_check.c` - resolve it by updating `src/sys.rs` and `abi_check.c`
 together, never by silently accepting the drift. (This is not hypothetical:
 upstream removed the `size_t *siglen` parameter from `signature_internal`
 between `v1.0.0-beta2-93` and `v1.0.0-beta2-137`.)

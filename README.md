@@ -1,6 +1,6 @@
 # mysten-mldsa-native-rs
 
-Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA-65 (FIPS 204) implementation —
+Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA-65 (FIPS 204) implementation -
 the CBMC-verified C90 code maintained by the Post-Quantum Cryptography Alliance, Linux Foundation.
 
 This crate is the scheme-agnostic middle layer: It is designed to be consumer-agnostic (e.g. MystenLabs' fastcrypto), 
@@ -64,8 +64,52 @@ git submodule update --init
 cargo test
 ```
 
-A C compiler is required; the portable C backend builds on every target (the verified
-AVX2/NEON backends are a possible future addition behind the same API).
+A C compiler is required; the default build compiles the portable C backend, which
+works on every target. The `native` cargo feature swaps in the formally verified
+assembly backends behind the same API: NEON on aarch64 and AVX2 on x86_64. Anything
+that is not architecture baseline is gated per machine by a runtime CPU probe, with
+automatic fallback to the portable C — AVX2 on x86_64, and the ARMv8.4-A FEAT_SHA3
+Keccak kernels on aarch64 (which the compiler compiles in whenever it targets SHA3,
+as Apple's clang does by default). Outputs are identical across backends; the
+cross-implementation known-answer vectors in `tests/` pin the exact public key and
+signature bytes and run under whichever backend is compiled. On other architectures,
+and on toolchains the assembly does not support (MSVC), the feature falls back to the
+portable C with a build warning.
+
+### Backend selection
+
+How a build decides what runs. Everything above the probe is settled by `build.rs` at
+compile time; the probe is the only run-time decision, made on first use and cached.
+
+```mermaid
+flowchart TD
+    A["build.rs"]
+    A --> C{"native<br/>feature?"}
+    C -- "off (default)" --> P1["portable C"]
+    C -- on --> D{"target?"}
+    D -- "aarch64<br/>(little-endian, non-MSVC)" --> N["NEON assembly<br/>(baseline) + SHA3 Keccak<br/>behind a runtime probe"]
+    D -- "x86_64<br/>(non-MSVC)" --> X["portable C + AVX2 assembly<br/>compiled side by side"]
+    D -- "other arch / MSVC" --> P2["portable C<br/>+ build warning"]
+    X --> R{"runtime probe<br/>(cpuid + xgetbv)"}
+    R -- "AVX2 + OS support" --> AV["AVX2 kernels"]
+    R -- "no AVX2" --> P3["portable C"]
+```
+
+And where those choices sit in the SIMD landscape. Upstream mldsa-native ships
+backends for the two extensions that are dependable in the field; the others have no
+backend to enable.
+
+```mermaid
+flowchart TD
+    ISA["ISA"] --> X86["x86-64"]
+    ISA --> ARM["AArch64"]
+    X86 --> AVX2["AVX2 - used"]
+    X86 --> AVX512["AVX-512 - not used"]
+    ARM --> NEON["NEON - used"]
+    ARM --> SVE["SVE - not used"]
+    style AVX2 stroke-width:3px
+    style NEON stroke-width:3px
+```
 
 ## Relation to mldsa-native-rs
 
