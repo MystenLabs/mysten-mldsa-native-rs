@@ -4,15 +4,33 @@
  */
 
 /*
- * Runtime CPU capability probe backing native_dispatch.h. Compiled only for x86_64 builds
- * with the native feature; see build.rs.
+ * Runtime AVX2 capability check for the x86_64 native backend.
+ * Why do we need this?
+ * x86_64 does not guarantee AVX2. A binary built with the native backend
+ * therefore needs to support two kinds of machines:
  *
- * The probe is raw cpuid/xgetbv instead of __builtin_cpu_supports: the builtin drags in a
- * libgcc/compiler-rt runtime symbol (__cpu_model) that not every link has, and it does not
- * everywhere confirm that the OS saves YMM state on context switches. Using AVX2 requires
- * all three of: the CPU flag, OSXSAVE, and XCR0 reporting XMM+YMM state enabled - the
- * sequence below is Intel's documented detection order.
+ *     AVX2 CPU     -> use the fast AVX2 kernels
+ *     no AVX2 CPU  -> use the portable C implementation
+ *
+ * This file answers one question:
+ *     "Can this process safely execute AVX2 instructions?"
+ * 
+ * Checking the CPU alone is not enough. AVX2 also requires the operating
+ * system to support saving/restoring the extended XMM/YMM register state.
+ * We therefore perform the standard three-part check:
+ *
+ *     1. CPUID says the OS supports XSAVE/XGETBV.
+ *     2. XCR0 says the OS has enabled XMM + YMM state.
+ *     3. CPUID says the CPU supports AVX2.
+ *
+ * The result is cached because CPUID/XGETBV are relatively expensive and
+ * the ML-DSA implementation may ask about the capability many times during
+ * a single signature.
+ *
+ * This file is only useful for GCC/Clang x86_64 builds. Other targets simply
+ * report that the capability is unavailable and use portable C.
  */
+
 
 int mysten_mldsa_sys_check_capability(int cap);
 

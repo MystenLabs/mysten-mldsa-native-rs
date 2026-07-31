@@ -4,6 +4,12 @@
 //! Builds the vendored mldsa-native library (git submodule at `deps/mldsa-native`; see
 //! `PROVENANCE.md` for the pinned commit) for the ML-DSA-65 parameter set.
 //!
+//! //! There are two implementations:
+//!
+//! - Portable C: always available and works on every supported target.
+//! - Native backend: uses architecture-specific assembly for better performance.
+//!   On AArch64 this is the NEON backend. On x86_64 this is the AVX2 backend.
+//! 
 //! The build intentionally mirrors upstream's monolithic build. mldsa-native is designed to
 //! be compiled as a single translation unit: `mldsa_native.c` `#include`s every
 //! implementation file, so exactly one file per build compiles it - either directly, or
