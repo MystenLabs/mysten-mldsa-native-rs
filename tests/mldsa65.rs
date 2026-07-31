@@ -19,6 +19,69 @@ const SEED_07_PK_PREFIX: [u8; 16] = [
 ];
 const SEED_07_PK_SUFFIX: [u8; 4] = [0x62, 0x57, 0xd4, 0xc4];
 
+/// Cross-implementation known-answer vectors: `(seed, message, context, rnd)` pinned to the
+/// exact public key and signature bytes. Every value below was produced by this crate and
+/// independently reproduced, byte for byte, by `@noble/post-quantum` and by aws-lc-rs — so
+/// these pins catch what a self-consistency test cannot: a backend (portable C / NEON /
+/// AVX2) or an upstream re-pin that changes the wire format while still round-tripping
+/// happily against itself. Without them nothing in this suite would notice a signature
+/// encoding change, which for a consensus-critical scheme is a chain split.
+///
+/// The cases sweep what implementations actually disagree about: empty vs digest-sized
+/// message, empty vs the 255-byte maximum context, and the deterministic (all-zero) vs a
+/// patterned hedge `rnd`. Head and tail fragments pin both ends of the encoding while
+/// keeping the file readable.
+struct Kat {
+    seed: u8,
+    msg: &'static [u8],
+    ctx_byte: u8,
+    ctx_len: usize,
+    rnd: u8,
+    pk_head: [u8; 8],
+    pk_tail: [u8; 4],
+    sig_head: [u8; 8],
+    sig_tail: [u8; 4],
+}
+
+const KATS: [Kat; 3] = [
+    // Empty message, empty context, deterministic rnd.
+    Kat {
+        seed: 0x01,
+        msg: &[],
+        ctx_byte: 0,
+        ctx_len: 0,
+        rnd: 0x00,
+        pk_head: [0xc4, 0xe9, 0x99, 0xa2, 0x03, 0x3f, 0xb0, 0xe1],
+        pk_tail: [0xf8, 0x84, 0x59, 0xcf],
+        sig_head: [0x64, 0xf7, 0xe9, 0x06, 0x5e, 0x19, 0xad, 0x1e],
+        sig_tail: [0x1a, 0x21, 0x27, 0x35],
+    },
+    // 32-byte digest (the shape Sui actually signs), empty context, hedged rnd.
+    Kat {
+        seed: 0x02,
+        msg: &[0xab; 32],
+        ctx_byte: 0,
+        ctx_len: 0,
+        rnd: 0x42,
+        pk_head: [0x0a, 0x41, 0xf2, 0x50, 0x0f, 0x7e, 0x59, 0x63],
+        pk_tail: [0x9e, 0x15, 0x41, 0xc7],
+        sig_head: [0x0e, 0xe3, 0x72, 0x0d, 0x10, 0x85, 0x86, 0x8d],
+        sig_tail: [0x15, 0x1c, 0x20, 0x24],
+    },
+    // Maximum-length context: the domain-separation prefix boundary.
+    Kat {
+        seed: 0x05,
+        msg: &[0xab; 32],
+        ctx_byte: 0x77,
+        ctx_len: MAX_CONTEXT_LENGTH,
+        rnd: 0x99,
+        pk_head: [0xbd, 0x1e, 0x29, 0x87, 0x2b, 0xbf, 0x68, 0x3a],
+        pk_tail: [0xb0, 0x4b, 0x29, 0x4f],
+        sig_head: [0xf7, 0xc7, 0x5d, 0x79, 0xe1, 0x3a, 0x52, 0x65],
+        sig_tail: [0x0e, 0x13, 0x17, 0x1b],
+    },
+];
+
 fn expand(byte: u8) -> (SigningKey, VerifyingKey) {
     SigningKeySeed::from([byte; SEED_LENGTH]).expand()
 }
@@ -42,6 +105,38 @@ fn keygen_is_deterministic_and_matches_reference() {
     let pk = vk_a;
     assert_eq!(pk.as_bytes()[..16], SEED_07_PK_PREFIX);
     assert_eq!(pk.as_bytes()[PUBLIC_KEY_LENGTH - 4..], SEED_07_PK_SUFFIX);
+}
+
+#[test]
+fn matches_cross_implementation_known_answers() {
+    layout_is_current();
+    for (i, k) in KATS.iter().enumerate() {
+        let ctx = vec![k.ctx_byte; k.ctx_len];
+        let (sk, vk) = SigningKeySeed::from([k.seed; SEED_LENGTH]).expand();
+
+        let pk = vk.as_bytes();
+        assert_eq!(pk[..8], k.pk_head, "KAT {i}: public key head");
+        assert_eq!(
+            pk[PUBLIC_KEY_LENGTH - 4..],
+            k.pk_tail,
+            "KAT {i}: public key tail"
+        );
+
+        let sig = sk
+            .sign(k.msg, &ctx, &[k.rnd; RND_LENGTH])
+            .expect("context length is within the FIPS 204 limit");
+        let sig = sig.as_bytes();
+        assert_eq!(
+            sig[..8],
+            k.sig_head,
+            "KAT {i}: signature head — the wire format changed"
+        );
+        assert_eq!(
+            sig[SIGNATURE_LENGTH - 4..],
+            k.sig_tail,
+            "KAT {i}: signature tail — the wire format changed"
+        );
+    }
 }
 
 #[test]

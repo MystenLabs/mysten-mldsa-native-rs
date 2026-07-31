@@ -66,12 +66,15 @@ cargo test
 
 A C compiler is required; the default build compiles the portable C backend, which
 works on every target. The `native` cargo feature swaps in the formally verified
-assembly backends behind the same API: NEON on aarch64 (selected at compile time),
-AVX2 on x86_64 (gated per machine by a runtime CPU probe, with automatic fallback to
-the portable C on CPUs without AVX2). Outputs are identical across backends, and the
-pinned test vectors verify that. On other architectures, and on toolchains the
-assembly does not support (MSVC), the feature falls back to the portable C with a
-build warning.
+assembly backends behind the same API: NEON on aarch64 and AVX2 on x86_64. Anything
+that is not architecture baseline is gated per machine by a runtime CPU probe, with
+automatic fallback to the portable C — AVX2 on x86_64, and the ARMv8.4-A FEAT_SHA3
+Keccak kernels on aarch64 (which the compiler compiles in whenever it targets SHA3,
+as Apple's clang does by default). Outputs are identical across backends; the
+cross-implementation known-answer vectors in `tests/` pin the exact public key and
+signature bytes and run under whichever backend is compiled. On other architectures,
+and on toolchains the assembly does not support (MSVC), the feature falls back to the
+portable C with a build warning.
 
 ### Backend selection
 
@@ -84,7 +87,7 @@ flowchart TD
     A --> C{"native<br/>feature?"}
     C -- "off (default)" --> P1["portable C"]
     C -- on --> D{"target?"}
-    D -- "aarch64<br/>(little-endian, non-MSVC)" --> N["NEON assembly<br/>(baseline hardware,<br/>no runtime check needed)"]
+    D -- "aarch64<br/>(little-endian, non-MSVC)" --> N["NEON assembly<br/>(baseline) + SHA3 Keccak<br/>behind a runtime probe"]
     D -- "x86_64<br/>(non-MSVC)" --> X["portable C + AVX2 assembly<br/>compiled side by side"]
     D -- "other arch / MSVC" --> P2["portable C<br/>+ build warning"]
     X --> R{"runtime probe<br/>(cpuid + xgetbv)"}

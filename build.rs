@@ -4,12 +4,12 @@
 //! Builds the vendored mldsa-native library (git submodule at `deps/mldsa-native`; see
 //! `PROVENANCE.md` for the pinned commit) for the ML-DSA-65 parameter set.
 //!
-//! //! There are two implementations:
+//! There are two implementations:
 //!
 //! - Portable C: always available and works on every supported target.
 //! - Native backend: uses architecture-specific assembly for better performance.
 //!   On AArch64 this is the NEON backend. On x86_64 this is the AVX2 backend.
-//! 
+//!
 //! The build intentionally mirrors upstream's monolithic build. mldsa-native is designed to
 //! be compiled as a single translation unit: `mldsa_native.c` `#include`s every
 //! implementation file, so exactly one file per build compiles it - either directly, or
@@ -26,7 +26,13 @@
 //! target. The `native` feature swaps in mldsa-native's formally verified assembly
 //! backends where available:
 //!
-//! - aarch64: NEON is baseline hardware, so the backend is selected at compile time.
+//! - aarch64: NEON is baseline hardware, so the arithmetic backend is selected at compile
+//!   time. FEAT_SHA3 (the ARMv8.4-A Keccak kernels) is not baseline, and the compiler pulls
+//!   it in whenever it defines `__ARM_FEATURE_SHA3` — Apple's clang does so by default — so
+//!   those kernels are gated behind a runtime HWCAP/sysctl probe (capability_aarch64.c).
+//!   Without it, a binary built on an SHA3-capable host SIGILLs on a Neoverse N1 (Graviton2)
+//!   or Cortex-A72 class CPU, because upstream's default capability hook assumes the build
+//!   host and the run host are the same machine.
 //! - x86_64: AVX2 is not baseline, so the backend is compiled in but every kernel call is
 //!   gated behind a runtime CPU probe (native_dispatch.h + capability_x86_64.c); machines
 //!   without AVX2 run the portable C. The C is deliberately compiled *without* `-mavx2`:
@@ -97,10 +103,16 @@ fn main() {
         .define("MLD_CONFIG_INTERNAL_API_QUALIFIER", "static")
         .std("c99");
 
-    // x86_64 native builds go through a thin wrapper that injects the runtime CPU
-    // probe; everything else compiles the upstream single-compilation-unit directly.
+    // Native builds go through a thin per-architecture wrapper that injects the runtime
+    // capability probe; everything else compiles the upstream single-compilation-unit
+    // directly. Both architectures need a probe, for different reasons: on x86_64 the AVX2
+    // arithmetic backend is not baseline, and on aarch64 NEON is but the ARMv8.4-A FEAT_SHA3
+    // Keccak kernels are not (Apple clang defines __ARM_FEATURE_SHA3 by default, so they get
+    // compiled in and would SIGILL on a Neoverse N1 / Cortex-A72 class CPU).
     if native_x86_64 {
         build.file(manifest_dir.join("src/single_level_x86_64.c"));
+    } else if native_aarch64 {
+        build.file(manifest_dir.join("src/single_level_aarch64.c"));
     } else {
         build.file(src.join("mldsa_native.c"));
     }
@@ -112,6 +124,11 @@ fn main() {
         build
             .define("MLD_CONFIG_USE_NATIVE_BACKEND_ARITH", None)
             .define("MLD_CONFIG_USE_NATIVE_BACKEND_FIPS202", None);
+        if native_aarch64 {
+            build
+                .define("MLD_BUILD_AARCH64_DISPATCH", None)
+                .file(manifest_dir.join("src/capability_aarch64.c"));
+        }
         if native_x86_64 {
             // Enables the AVX2 backend without letting the compiler itself emit AVX2; see
             // the module comment. The probe compiles under the same AVX2-free flags, so it
@@ -147,6 +164,8 @@ fn main() {
         "src/native_dispatch.h",
         "src/capability_x86_64.c",
         "src/single_level_x86_64.c",
+        "src/capability_aarch64.c",
+        "src/single_level_aarch64.c",
     ] {
         println!("cargo:rerun-if-changed={}", manifest_dir.join(f).display());
     }
