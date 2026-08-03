@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Mysten Labs <build@mystenlabs.com>"]
-description = "Minimal safe Rust wrapper around the mldsa-native ML-DSA-65 (FIPS 204) implementation"
+description = "Minimal safe Rust wrapper around the mldsa-native ML-DSA (FIPS 204) implementation"
 readme = "README.md"
 repository = "https://github.com/MystenLabs/mysten-mldsa-native-rs"
 
@@ -26,6 +26,13 @@ include = [
 # the backend per machine and falls back to portable C without AVX2; see build.rs for how
 # the AVX2 code is kept out of the compiler's hands.
 native = []
+# Additionally compile the ML-DSA-44 / ML-DSA-87 parameter sets alongside ML-DSA-65
+# (upstream's multilevel monobuild) and expose their per-level Rust modules. ML-DSA-65 is
+# always on; the levels are not wire-compatible with each other, so picking one is a
+# protocol decision. Orthogonal to `native`: the assembly backends cover every compiled
+# level from one assembly unit.
+mldsa44 = []
+mldsa87 = []
 
 [dependencies]
 zeroize = "1"

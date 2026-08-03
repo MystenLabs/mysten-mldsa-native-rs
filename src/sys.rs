@@ -35,6 +35,20 @@ pub const MLDSA_RNDBYTES: usize = 32;
 pub const MLDSA65_PUBLICKEYBYTES: usize = 1952;
 pub const MLDSA65_SECRETKEYBYTES: usize = 4032;
 pub const MLDSA65_BYTES: usize = 3309;
+/// MLDSA44 specific ones:
+#[cfg(feature = "mldsa44")]
+pub const MLDSA44_PUBLICKEYBYTES: usize = 1312;
+#[cfg(feature = "mldsa44")]
+pub const MLDSA44_SECRETKEYBYTES: usize = 2560;
+#[cfg(feature = "mldsa44")]
+pub const MLDSA44_BYTES: usize = 2420;
+/// MLDSA87 specific ones:
+#[cfg(feature = "mldsa87")]
+pub const MLDSA87_PUBLICKEYBYTES: usize = 2592;
+#[cfg(feature = "mldsa87")]
+pub const MLDSA87_SECRETKEYBYTES: usize = 4896;
+#[cfg(feature = "mldsa87")]
+pub const MLDSA87_BYTES: usize = 4627;
 
 extern "C" {
     /// Implements FIPS 204 Algorithm 6 (ML-DSA.KeyGen_internal).
@@ -73,6 +87,71 @@ extern "C" {
     /// and `ctxlen > 255`, so callers must treat it as opaque failure, never classify it.
     #[link_name = "PQCP_MLDSA_NATIVE_MLDSA65_verify"]
     pub fn mldsa65_verify(
+        sig: *const u8,
+        m: *const u8,
+        mlen: usize,
+        ctx: *const u8,
+        ctxlen: usize,
+        pk: *const u8,
+    ) -> i32;
+}
+
+// The optional parameter sets. Same three entry points with the same contracts as above,
+// differing only in their buffer lengths; `build.rs` compiles their C alongside ML-DSA-65
+// when the matching feature is on, and `abi_check.c` pins their sizes and prototypes too.
+#[cfg(feature = "mldsa44")]
+extern "C" {
+    /// ML-DSA-44 FIPS 204 Algorithm 6 (ML-DSA.KeyGen_internal).
+    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA44_keypair_internal"]
+    pub fn mldsa44_keypair_internal(pk: *mut u8, sk: *mut u8, seed: *const u8) -> i32;
+
+    /// ML-DSA-44 FIPS 204 Algorithm 7 (ML-DSA.Sign_internal, `externalmu = 0`).
+    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA44_signature_internal"]
+    pub fn mldsa44_signature_internal(
+        sig: *mut u8,
+        m: *const u8,
+        mlen: usize,
+        pre: *const u8,
+        prelen: usize,
+        rnd: *const u8,
+        sk: *const u8,
+        externalmu: i32,
+    ) -> i32;
+
+    /// ML-DSA-44 FIPS 204 Algorithm 3 (ML-DSA.Verify).
+    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA44_verify"]
+    pub fn mldsa44_verify(
+        sig: *const u8,
+        m: *const u8,
+        mlen: usize,
+        ctx: *const u8,
+        ctxlen: usize,
+        pk: *const u8,
+    ) -> i32;
+}
+
+#[cfg(feature = "mldsa87")]
+extern "C" {
+    /// ML-DSA-87 FIPS 204 Algorithm 6 (ML-DSA.KeyGen_internal).
+    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA87_keypair_internal"]
+    pub fn mldsa87_keypair_internal(pk: *mut u8, sk: *mut u8, seed: *const u8) -> i32;
+
+    /// ML-DSA-87 FIPS 204 Algorithm 7 (ML-DSA.Sign_internal, `externalmu = 0`).
+    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA87_signature_internal"]
+    pub fn mldsa87_signature_internal(
+        sig: *mut u8,
+        m: *const u8,
+        mlen: usize,
+        pre: *const u8,
+        prelen: usize,
+        rnd: *const u8,
+        sk: *const u8,
+        externalmu: i32,
+    ) -> i32;
+
+    /// ML-DSA-87 FIPS 204 Algorithm 3 (ML-DSA.Verify).
+    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA87_verify"]
+    pub fn mldsa87_verify(
         sig: *const u8,
         m: *const u8,
         mlen: usize,

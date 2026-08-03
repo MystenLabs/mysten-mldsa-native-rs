@@ -1,7 +1,9 @@
 # mysten-mldsa-native-rs
 
-Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA-65 (FIPS 204) implementation -
+Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA (FIPS 204) implementation -
 the CBMC-verified C90 code maintained by the Post-Quantum Cryptography Alliance, Linux Foundation.
+ML-DSA-65 is always compiled and re-exported at the crate root; ML-DSA-44 and ML-DSA-87 are
+available behind cargo features.
 
 This crate is the scheme-agnostic middle layer: It is designed to be consumer-agnostic (e.g. MystenLabs' fastcrypto), 
 as the consumer can wrap these types and implement their own traits on top.
@@ -76,6 +78,34 @@ signature bytes and run under whichever backend is compiled. On other architectu
 and on toolchains the assembly does not support (MSVC), the feature falls back to the
 portable C with a build warning.
 
+### Parameter sets
+
+ML-DSA-65 is always compiled and re-exported at the crate root, so `use
+mysten_mldsa_native_rs::SigningKeySeed` keeps working unchanged. The `mldsa44` and
+`mldsa87` features additionally compile those parameter sets and expose them as
+`mysten_mldsa_native_rs::mldsa44` / `::mldsa87`, with the identical API — the levels are
+generated from one implementation (`src/level.rs`) and share one test suite, so a level
+cannot quietly lose coverage.
+
+```bash
+cargo build                            # ML-DSA-65 only, portable C
+cargo build --features native          # ML-DSA-65, assembly backends
+cargo build --features mldsa44,mldsa87 # all three levels
+cargo build --all-features             # all three levels, assembly backends
+```
+
+The levels are **not** wire-compatible with each other, so choosing one is a protocol
+decision, not a tuning knob. Enabling them is additive in every sense: the features
+compose with `native` (one assembly unit serves every compiled level), the extra levels
+add only their own code because ML-DSA-65 carries the shared FIPS202 implementation, and
+nothing about the default build changes.
+
+Internally this uses upstream's multilevel monobuild shape (`src/multilevel.c`), the same
+pattern AWS-LC uses in production: one translation unit that includes the implementation
+once per parameter set, with the namespacing machinery keeping each level's symbols
+distinct. It replaces the single-level shims when enabled and takes over their job of
+injecting the runtime capability probe.
+
 ### Backend selection
 
 How a build decides what runs. Everything above the probe is settled by `build.rs` at
@@ -84,7 +114,11 @@ compile time; the probe is the only run-time decision, made on first use and cac
 ```mermaid
 flowchart TD
     A["build.rs"]
-    A --> C{"native<br/>feature?"}
+    A --> L{"mldsa44 /<br/>mldsa87?"}
+    L -- "off (default)" --> S["single-level:<br/>ML-DSA-65 only"]
+    L -- on --> M["multilevel.c:<br/>65 + enabled levels,<br/>one translation unit"]
+    S --> C{"native<br/>feature?"}
+    M --> C
     C -- "off (default)" --> P1["portable C"]
     C -- on --> D{"target?"}
     D -- "aarch64<br/>(little-endian, non-MSVC)" --> N["NEON assembly<br/>(baseline) + SHA3 Keccak<br/>behind a runtime probe"]
@@ -110,6 +144,34 @@ flowchart TD
     style AVX2 stroke-width:3px
     style NEON stroke-width:3px
 ```
+
+### Footprint
+
+Everything above compiles into the calling binary, so it is worth knowing what each
+feature actually costs. The figures below are the size a linked binary grows by,
+measured against an otherwise identical hello-world, on aarch64 macOS with a plain
+`--release` profile:
+
+| What is compiled | Adds |
+| --- | --- |
+| ML-DSA-65, portable C (the default) | +67 KB |
+| ML-DSA-65, assembly backends (`native`) | +85 KB |
+| all three levels, portable C | +152 KB |
+| all three levels, assembly backends | +187 KB |
+
+Two things are worth reading off that table. The assembly backends cost about 18 KB
+for a roughly 2.5x speedup, which is the cheapest trade here by a wide margin. And the
+extra parameter sets cost less than doubling: ML-DSA-65 carries the shared FIPS202 and
+Keccak code, so ML-DSA-44 and ML-DSA-87 only bring their own polynomial arithmetic.
+
+For comparison, linking aws-lc-rs for ML-DSA-65 alone adds around 1.7 MB, because the
+scheme arrives with the rest of its libcrypto. This crate compiles one algorithm and
+nothing else, which is most of the difference.
+
+Reproducing the numbers is a matter of building the same workload twice, once with the
+crate and once without, and taking the difference. Turning on LTO and `strip` shrinks
+every binary by roughly 130 KB, but it leaves the figures above almost unchanged, since
+what it removes is mostly the Rust runtime rather than this crate's contribution.
 
 ## Relation to mldsa-native-rs
 
