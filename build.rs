@@ -59,6 +59,12 @@
 //!
 //! The code is compiled as C99 to match upstream's CI. MSVC ignores the C99 flag, which is
 //! harmless because upstream keeps the code C90-compatible.
+//!
+//! The way this build drives the vendored C follows AWS-LC, which vendors the same library
+//! in production (`crypto/fipsmodule/ml_dsa/`). Three decisions are theirs: configure the C
+//! through `MLD_CONFIG_*` defines rather than patching it, replace the capability hook with
+//! our own CPU check, and compile the C without arch flags so vector code stays inside the
+//! probe-gated assembly. No AWS-LC code is used here, only the approach.
 
 use std::path::PathBuf;
 

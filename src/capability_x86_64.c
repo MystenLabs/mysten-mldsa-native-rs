@@ -29,6 +29,10 @@
  *
  * This file is only useful for GCC/Clang x86_64 builds. Other targets simply
  * report that the capability is unavailable and use portable C.
+ *
+ * AWS-LC answers this same question for the same library, but delegates it to
+ * CRYPTO_is_AVX2_capable() since it already ships OpenSSL's CPU-feature
+ * machinery. This crate has none to borrow from, so the checks are written out here.
  */
 
 
