@@ -7,8 +7,10 @@
 //! ML-DSA-44, 65 and 87 have exactly the same API. All that changes between them is a
 //! handful of byte lengths and which C functions get called:
 //!
-//!     one macro       -> a fix or an audit finding lands on all three levels at once
-//!     three copies    -> the levels drift apart, and nobody notices which one is stale
+//! ```text
+//! one macro    -> a fix or an audit finding lands on all three levels at once
+//! three copies -> the levels drift apart, and nobody notices which one is stale
+//! ```
 //!
 //! So the types live here and each level instantiates them. What comes out is an ordinary
 //! module of concrete types. There are no generics and no trait objects, so callers see the

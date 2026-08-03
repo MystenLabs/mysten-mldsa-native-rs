@@ -28,7 +28,7 @@
 //!
 //! - aarch64: NEON is baseline hardware, so the arithmetic backend is selected at compile
 //!   time. FEAT_SHA3 (the ARMv8.4-A Keccak kernels) is not baseline, and the compiler pulls
-//!   it in whenever it defines `__ARM_FEATURE_SHA3` — Apple's clang does so by default — so
+//!   it in whenever it defines `__ARM_FEATURE_SHA3`, Apple's clang does so by default, so
 //!   those kernels are gated behind a runtime HWCAP/sysctl probe (capability_aarch64.c).
 //!   Without it, a binary built on an SHA3-capable host SIGILLs on a Neoverse N1 (Graviton2)
 //!   or Cortex-A72 class CPU, because upstream's default capability hook assumes the build
