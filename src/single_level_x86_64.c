@@ -34,10 +34,9 @@
 #include "native_dispatch.h"
 #include "mldsa_native.c"
 
-/* capability_x86_64.c hard-codes capability 0 as "AVX2" without seeing upstream's
- * mld_sys_cap enum (a standalone TU cannot include sys.h without the whole config). This
- * pins the enum position: a re-pin that reorders mld_sys_cap fails here at compile time
- * instead of silently misrouting the probe. */
+/* The Rust probe (src/capability.rs) hard-codes capability 0 as "AVX2" without seeing
+ * upstream's mld_sys_cap enum. This pins the enum position: a re-pin that reorders
+ * mld_sys_cap fails here at compile time instead of silently misrouting the probe. */
 typedef char mld_assert_avx2_cap_is_zero[(MLD_SYS_CAP_X86_64_AVX2 == 0) ? 1 : -1];
 
 /* The whole point of the native feature is that the assembly backend is actually

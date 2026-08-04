@@ -54,6 +54,9 @@
 
 use std::fmt;
 use zeroize::Zeroize;
+// The runtime CPU probe the vendored C calls in native builds.
+#[cfg(feature = "native")]
+mod capability;
 mod sys;
 
 /// The length of a signing-key seed in bytes: the FIPS 204 seed `/Xi`
