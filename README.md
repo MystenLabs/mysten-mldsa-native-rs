@@ -1,5 +1,9 @@
 # mysten-mldsa-native-rs
 
+> [!WARNING]
+> This crate has not been audited and is not ready for production use. The API and the
+> pinned upstream commit may change without notice until a release is tagged.
+
 Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA-65 (FIPS 204) implementation -
 the CBMC-verified C90 code maintained by the Post-Quantum Cryptography Alliance, Linux Foundation.
 
@@ -111,17 +115,7 @@ flowchart TD
     style NEON stroke-width:3px
 ```
 
-## Relation to mldsa-native-rs
-
-[mldsa-native-rs] wraps the same C library with a different contract: bindgen-generated bindings, all three parameter sets, RustCrypto
-`signature`-trait integration, an expanded-key (4032-byte) `SigningKey` with no seed
-retention, and the C's randomized API compiled in behind a `randombytes` link symbol.
-This crate exists for consumers that need the opposite trade-offs: seed-as-private-key,
-no build-time code generation, no entropy path in the C, zeroization, and a surface
-small enough to audit in one sitting.
-
 [mldsa-native]: https://github.com/pq-code-package/mldsa-native
-[mldsa-native-rs]: https://gitlab.com/nisec/qubip/mldsa-native-rs
 
 ## Development
 
