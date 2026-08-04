@@ -5,6 +5,11 @@ use mysten_mldsa_native_rs::{
     Error, Signature, SigningKey, SigningKeySeed, VerifyingKey, MAX_CONTEXT_LENGTH,
     PUBLIC_KEY_LENGTH, RND_LENGTH, SEED_LENGTH, SIGNATURE_LENGTH,
 };
+use sha2::{Digest, Sha256};
+
+// TODO: add the Wycheproof ML-DSA-65 vectors (github.com/C2SP/wycheproof,
+// testvectors_v1). Vendor the JSON files with their source commit because
+// the `wycheproof` crate has no ML-DSA support, so parse the JSON directly.
 
 // ML-DSA-65 signature layout (FIPS 204 / mldsa-native params.h)
 const CTILDE_BYTES: usize = 48;
@@ -29,8 +34,10 @@ const SEED_07_PK_SUFFIX: [u8; 4] = [0x62, 0x57, 0xd4, 0xc4];
 ///
 /// The cases sweep what implementations actually disagree about: empty vs digest-sized
 /// message, empty vs the 255-byte maximum context, and the deterministic (all-zero) vs a
-/// patterned hedge `rnd`. Head and tail fragments pin both ends of the encoding while
-/// keeping the file readable.
+/// patterned hedge `rnd`. Each case pins its values twice: head/tail fragments give
+/// readable output when something breaks, and a SHA-256 of the whole public key and
+/// signature covers every byte in between - so after a submodule re-pin, `cargo test`
+/// alone proves the outputs did not change.
 struct Kat {
     seed: u8,
     msg: &'static [u8],
@@ -41,6 +48,8 @@ struct Kat {
     pk_tail: [u8; 4],
     sig_head: [u8; 8],
     sig_tail: [u8; 4],
+    pk_sha256: &'static str,
+    sig_sha256: &'static str,
 }
 
 const KATS: [Kat; 3] = [
@@ -55,6 +64,8 @@ const KATS: [Kat; 3] = [
         pk_tail: [0xf8, 0x84, 0x59, 0xcf],
         sig_head: [0x64, 0xf7, 0xe9, 0x06, 0x5e, 0x19, 0xad, 0x1e],
         sig_tail: [0x1a, 0x21, 0x27, 0x35],
+        pk_sha256: "83ee80fcbcaf4872ed023e55cb10d7a2b4f1336a182115ea9c000f7449a7a9b0",
+        sig_sha256: "fc3b57f04d4702bca59c145179b052fcbf47c1985bdc6079887721a800239b3e",
     },
     // 32-byte digest (the shape Sui actually signs), empty context, hedged rnd.
     Kat {
@@ -67,6 +78,8 @@ const KATS: [Kat; 3] = [
         pk_tail: [0x9e, 0x15, 0x41, 0xc7],
         sig_head: [0x0e, 0xe3, 0x72, 0x0d, 0x10, 0x85, 0x86, 0x8d],
         sig_tail: [0x15, 0x1c, 0x20, 0x24],
+        pk_sha256: "fda6ad37a2ab2ae563455cc73b3d263e13fc889914d975127dfbb3a07f274a1d",
+        sig_sha256: "451654a6e990370fb0f5922c179eb08621abb31290f788449d95a4f625a5375a",
     },
     // Maximum-length context: the domain-separation prefix boundary.
     Kat {
@@ -79,6 +92,8 @@ const KATS: [Kat; 3] = [
         pk_tail: [0xb0, 0x4b, 0x29, 0x4f],
         sig_head: [0xf7, 0xc7, 0x5d, 0x79, 0xe1, 0x3a, 0x52, 0x65],
         sig_tail: [0x0e, 0x13, 0x17, 0x1b],
+        pk_sha256: "db0229df233110413da2c2031249e0a28300b68245b20668e723d11c127acb51",
+        sig_sha256: "29e7403be757a7fea1760db9117cf06c52b7a169000772539ff0ce2eda31cc3a",
     },
 ];
 
@@ -121,6 +136,11 @@ fn matches_cross_implementation_known_answers() {
             k.pk_tail,
             "KAT {i}: public key tail"
         );
+        assert_eq!(
+            hex::encode(Sha256::digest(pk)),
+            k.pk_sha256,
+            "KAT {i}: full public key diverged"
+        );
 
         let sig = sk
             .sign(k.msg, &ctx, &[k.rnd; RND_LENGTH])
@@ -135,6 +155,11 @@ fn matches_cross_implementation_known_answers() {
             sig[SIGNATURE_LENGTH - 4..],
             k.sig_tail,
             "KAT {i}: signature tail — the wire format changed"
+        );
+        assert_eq!(
+            hex::encode(Sha256::digest(sig)),
+            k.sig_sha256,
+            "KAT {i}: full signature diverged"
         );
     }
 }

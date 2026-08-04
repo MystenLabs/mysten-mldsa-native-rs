@@ -28,7 +28,7 @@
 //!
 //! - aarch64: NEON is baseline hardware, so the arithmetic backend is selected at compile
 //!   time. FEAT_SHA3 (the ARMv8.4-A Keccak kernels) is not baseline, and the compiler pulls
-//!   it in whenever it defines `__ARM_FEATURE_SHA3` — Apple's clang does so by default — so
+//!   it in whenever it defines `__ARM_FEATURE_SHA3`, Apple's clang does so by default, so
 //!   those kernels are gated behind a runtime HWCAP/sysctl probe (capability_aarch64.c).
 //!   Without it, a binary built on an SHA3-capable host SIGILLs on a Neoverse N1 (Graviton2)
 //!   or Cortex-A72 class CPU, because upstream's default capability hook assumes the build
@@ -40,8 +40,8 @@
 //!   arch flag would let the compiler emit AVX2 into the unguarded C (auto-vectorization,
 //!   memcpy expansion), crashing pre-AVX2 machines. The backend is enabled by defining
 //!   `MLD_SYS_X86_64_AVX2` directly instead - the same macro upstream's sys.h derives
-//!   from `__AVX2__`. If a re-pin renames that macro the backend silently deactivates
-//!   (still correct, just portable-C speed), so re-pins must re-check it.
+//!   from `__AVX2__`. If a re-pin renames either macro, single_level_x86_64.c notices
+//!   that no backend got selected and fails the compile.
 //! - Elsewhere (and under MSVC, which can neither assemble the GAS-syntax asm bundle nor
 //!   call the SysV-ABI kernels): the portable C builds with a cargo warning.
 //!
@@ -86,9 +86,9 @@ fn main() {
     // The asm bundle is GAS syntax and its x86_64 kernels use the SysV calling convention;
     // MSVC handles neither, so native there falls back to the portable C.
     let gnu_compatible_cc = target_env != "msvc";
-    // Upstream's NEON backend is little-endian only (sys.h gates on __AARCH64EL__);
-    // without the endian check, aarch64_be would silently build portable C while skipping
-    // the warning below.
+    // Upstream's NEON backend is little-endian only (sys.h checks __AARCH64EL__). With
+    // this endian check, a big-endian aarch64 build gets portable C plus the warning
+    // below; without it, it would fail on the shim's backend-selected #error.
     let native_aarch64 =
         native && target_arch == "aarch64" && target_endian == "little" && gnu_compatible_cc;
     let native_x86_64 = native && target_arch == "x86_64" && gnu_compatible_cc;
