@@ -21,10 +21,6 @@
  *
  * Only the capabilities upstream's aarch64 backend actually queries are
  * answered here; anything else reports unsupported so the portable C runs.
- *
- * Same shape as capability_x86_64.c, which follows how AWS-LC vendors this
- * library. AWS-LC answers only the x86_64 question because it does not enable
- * the aarch64 backend, so the SHA3 probe below has no counterpart there.
  */
 
 int mysten_mldsa_sys_check_capability(int cap);
