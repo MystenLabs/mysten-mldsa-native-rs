@@ -49,10 +49,10 @@ const SEED: &str = "010101010101010101010101010101010101010101010101010101010101
 let seed: [u8; SEED_LENGTH] = hex::decode(SEED).unwrap().try_into().unwrap();
 let msg = hex::decode(MSG).unwrap();
 
-let sk = SigningKeySeed::from(seed).expand();
+let (sk, vk) = SigningKeySeed::from(seed).expand();
 let rnd = [42u8; RND_LENGTH]; // draw fresh from the OS per signature in real use
 let sig = sk.sign(&msg, b"", &rnd).unwrap();
-assert!(sk.verifying_key().verify(&msg, b"", &sig).is_ok());
+assert!(vk.verify(&msg, b"", &sig).is_ok());
 ```
 
 The same example runs as the crate's doctest, so it cannot drift from the API.

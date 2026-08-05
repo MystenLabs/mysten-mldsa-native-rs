@@ -55,6 +55,70 @@ jobs:
       - run: cargo test
       - run: cargo test --all-features
 
+  # The test matrix builds only what its three runners run natively. These legs
+  # cross-compile the remaining supported targets. Each one puts the same kernels
+  # through a different assembler and object format (GNU as/ELF, Apple as/Mach-O,
+  # mingw/COFF), so every supported target at least compiles.
+  cross-compile:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            packages: gcc-aarch64-linux-gnu
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+            packages: gcc-mingw-w64-x86-64
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      # cargo uses the toolchain pinned in rust-toolchain.toml, so the target must be
+      # added to that toolchain. The action's `targets:` input would install it into
+      # `stable`, which cargo never uses here.
+      - run: rustup target add ${{ matrix.target }}
+      - if: matrix.packages
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
+      - run: cargo check --target ${{ matrix.target }} --all-features
+
+  # Everything else in CI builds at opt-level 0. This job tests the optimized build,
+  # where optimizer bugs would show up - and where the compiler would emit AVX2 into
+  # the C if the containment rule ever broke, so the objdump check runs here too.
+  release-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --release --all-features
+      # The C library (libmldsa65.a) must contain no AVX2 at all, i.e. no ymm
+      # registers; only the assembly library may. The nonzero check on the assembly
+      # proves the scan looked at the right files and the backend was really built.
+      - name: AVX2 stays inside the probe-gated assembly
+        if: runner.os == 'Linux'
+        run: |
+          c_lib=$(find target/release -name libmldsa65.a | head -1)
+          asm_lib=$(find target/release -name libmldsa_native_asm.a | head -1)
+          test -n "$c_lib" && test -n "$asm_lib"
+          c_ymm=$(objdump -d "$c_lib" | grep -c '%ymm' || true)
+          asm_ymm=$(objdump -d "$asm_lib" | grep -c '%ymm' || true)
+          echo "ymm in C objects: $c_ymm; in asm bundle: $asm_ymm"
+          test "$c_ymm" -eq 0 && test "$asm_ymm" -gt 0
+
   clippy:
     runs-on: ubuntu-latest
     steps:

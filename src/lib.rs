@@ -54,6 +54,9 @@
 
 use std::fmt;
 use zeroize::Zeroize;
+// The runtime CPU probe the vendored C calls in native builds.
+#[cfg(feature = "native")]
+mod capability;
 mod sys;
 
 /// The length of a signing-key seed in bytes: the FIPS 204 seed `/Xi`
@@ -128,7 +131,7 @@ impl SigningKeySeed {
 
     /// Expand into the operational [`SigningKey`] and its [`VerifyingKey`] via
     /// ML-DSA.KeyGen_internal (FIPS 204 Algorithm 6). The public key is a byproduct of the
-    /// same expansion, so both cost one keygen, about as much as signing (~150 microseconds);
+    /// same expansion, so both cost one keygen (tens of microseconds, backend-dependent);
     /// callers that sign repeatedly are recommended to keep the expanded key instead of
     /// reexpanding it.
     pub fn expand(&self) -> (SigningKey, VerifyingKey) {

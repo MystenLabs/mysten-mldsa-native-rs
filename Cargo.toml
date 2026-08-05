@@ -21,17 +21,20 @@ include = [
 ]
 
 [features]
-# Compiles mldsa-native's formally verified assembly backends instead of the portable C.
-# aarch64/NEON and x86_64/AVX2; identical outputs. On x86_64 a runtime CPU probe gates
-# the backend per machine and falls back to portable C without AVX2; see build.rs for how
-# the AVX2 code is kept out of the compiler's hands.
-native = []
+# Compiles mldsa-native's formally verified assembly backends instead of the portable C:
+# NEON on aarch64, AVX2 on x86_64. Outputs are identical. Features that not every CPU
+# has stay behind a runtime probe that falls back to portable C: AVX2 on x86_64, and the
+# FEAT_SHA3 Keccak kernels on aarch64. The probe is Rust (src/capability.rs, using
+# cpufeatures); see build.rs for how AVX2 is kept out of compiler-generated code.
+native = ["dep:cpufeatures"]
 
 [dependencies]
 zeroize = "1"
+cpufeatures = { version = "0.2", optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"
+sha2 = "0.10"
 
 [build-dependencies]
 cc = "1"

@@ -102,7 +102,7 @@ mod tests {
             "keygen left pk untouched"
         );
 
-        let msg = b"fastcrypto-pq sys smoke test";
+        let msg = b"mysten-mldsa-native-rs sys smoke test";
         let rnd = [9u8; MLDSA_RNDBYTES];
         let mut sig = [0u8; MLDSA65_BYTES];
         let rc = unsafe {
