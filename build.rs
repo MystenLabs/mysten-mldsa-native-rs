@@ -29,19 +29,19 @@
 //! - aarch64: NEON is baseline hardware, so the arithmetic backend is selected at compile
 //!   time. FEAT_SHA3 (the ARMv8.4-A Keccak kernels) is not baseline, and the compiler pulls
 //!   it in whenever it defines `__ARM_FEATURE_SHA3`, Apple's clang does so by default, so
-//!   those kernels are gated behind a runtime HWCAP/sysctl probe (capability_aarch64.c).
+//!   those kernels are gated behind a runtime HWCAP/sysctl probe (src/capability.rs).
 //!   Without it, a binary built on an SHA3-capable host SIGILLs on a Neoverse N1 (Graviton2)
 //!   or Cortex-A72 class CPU, because upstream's default capability hook assumes the build
 //!   host and the run host are the same machine.
 //! - x86_64: AVX2 is not baseline, so the backend is compiled in but every kernel call is
-//!   gated behind a runtime CPU probe (native_dispatch.h + capability_x86_64.c); machines
+//!   gated behind a runtime CPU probe (native_dispatch.h + src/capability.rs); machines
 //!   without AVX2 run the portable C. The C is deliberately compiled *without* `-mavx2`:
 //!   the AVX2 code must stay confined to the probe-gated hand-written kernels, and an
 //!   arch flag would let the compiler emit AVX2 into the unguarded C (auto-vectorization,
 //!   memcpy expansion), crashing pre-AVX2 machines. The backend is enabled by defining
 //!   `MLD_SYS_X86_64_AVX2` directly instead - the same macro upstream's sys.h derives
-//!   from `__AVX2__`. If a re-pin renames that macro the backend silently deactivates
-//!   (still correct, just portable-C speed), so re-pins must re-check it.
+//!   from `__AVX2__`. If a re-pin renames either macro, single_level_x86_64.c notices
+//!   that no backend got selected and fails the compile.
 //! - Elsewhere (and under MSVC, which can neither assemble the GAS-syntax asm bundle nor
 //!   call the SysV-ABI kernels): the portable C builds with a cargo warning.
 //!
@@ -67,6 +67,11 @@
 //! single assembly unit serves every compiled level, and it takes over the probe injection
 //! the single-level shims do otherwise. abi_check.c compiles on its own in that case,
 //! because its size assertions need one fixed parameter set.
+//!
+//! The way this build drives the vendored C follows AWS-LC; configure the C through
+//! `MLD_CONFIG_*` defines rather than patching it, replace the capability hook with
+//! our own CPU check, and compile the C without arch flags so vector code stays inside the
+//! probe-gated assembly.
 
 use std::path::PathBuf;
 
@@ -93,9 +98,9 @@ fn main() {
     // The asm bundle is GAS syntax and its x86_64 kernels use the SysV calling convention;
     // MSVC handles neither, so native there falls back to the portable C.
     let gnu_compatible_cc = target_env != "msvc";
-    // Upstream's NEON backend is little-endian only (sys.h gates on __AARCH64EL__);
-    // without the endian check, aarch64_be would silently build portable C while skipping
-    // the warning below.
+    // Upstream's NEON backend is little-endian only (sys.h checks __AARCH64EL__). With
+    // this endian check, a big-endian aarch64 build gets portable C plus the warning
+    // below; without it, it would fail on the shim's backend-selected #error.
     let native_aarch64 =
         native && target_arch == "aarch64" && target_endian == "little" && gnu_compatible_cc;
     let native_x86_64 = native && target_arch == "x86_64" && gnu_compatible_cc;
@@ -142,13 +147,13 @@ fn main() {
         }
         checks.compile("mldsa65_abi_check");
     } else {
-        // Native builds go through a thin per-architecture wrapper that injects the runtime
-        // capability probe; everything else compiles the upstream single-compilation-unit
-        // directly. Both architectures need a probe, for different reasons: on x86_64 the
-        // AVX2 arithmetic backend is not baseline, and on aarch64 NEON is but the ARMv8.4-A
-        // FEAT_SHA3 Keccak kernels are not (Apple clang defines __ARM_FEATURE_SHA3 by
-        // default, so they get compiled in and would SIGILL on a Neoverse N1 / Cortex-A72
-        // class CPU).
+        // Native builds go through a thin per-architecture wrapper that routes upstream's
+        // capability question to the Rust probe (src/capability.rs); everything else
+        // compiles the upstream single-compilation-unit directly. Both architectures need
+        // the probe, for different reasons: on x86_64 the AVX2 arithmetic backend is not
+        // baseline, and on aarch64 NEON is but the ARMv8.4-A FEAT_SHA3 Keccak kernels are
+        // not (Apple clang defines __ARM_FEATURE_SHA3 by default, so they get compiled in
+        // and would SIGILL on a Neoverse N1 / Cortex-A72 class CPU).
         if native_x86_64 {
             build.file(manifest_dir.join("src/single_level_x86_64.c"));
         } else if native_aarch64 {
@@ -166,20 +171,16 @@ fn main() {
             .define("MLD_CONFIG_USE_NATIVE_BACKEND_ARITH", None)
             .define("MLD_CONFIG_USE_NATIVE_BACKEND_FIPS202", None);
         if native_aarch64 {
-            build
-                .define("MLD_BUILD_AARCH64_DISPATCH", None)
-                .file(manifest_dir.join("src/capability_aarch64.c"));
+            build.define("MLD_BUILD_AARCH64_DISPATCH", None);
         }
         if native_x86_64 {
             // Enables the AVX2 backend without letting the compiler itself emit AVX2; see
-            // the module comment. The probe compiles under the same AVX2-free flags, so it
-            // cannot itself contain AVX2. MLD_BUILD_X86_64_DISPATCH marks builds carrying
-            // the dispatch machinery: single_level_x86_64.c and multilevel.c both assert it
+            // the module comment. MLD_BUILD_X86_64_DISPATCH marks builds carrying the
+            // dispatch machinery: single_level_x86_64.c and multilevel.c both assert it
             // and gate their native_dispatch.h include on it.
             build
                 .define("MLD_SYS_X86_64_AVX2", None)
-                .define("MLD_BUILD_X86_64_DISPATCH", None)
-                .file(manifest_dir.join("src/capability_x86_64.c"));
+                .define("MLD_BUILD_X86_64_DISPATCH", None);
         }
         // One assembly unit covers every level; for multilevel builds upstream compiles it
         // with MLD_CONFIG_MULTILEVEL_WITH_SHARED (see examples/monolithic_build_multilevel_native).
@@ -211,9 +212,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", multilevel_shim.display());
     for f in [
         "src/native_dispatch.h",
-        "src/capability_x86_64.c",
         "src/single_level_x86_64.c",
-        "src/capability_aarch64.c",
         "src/single_level_aarch64.c",
     ] {
         println!("cargo:rerun-if-changed={}", manifest_dir.join(f).display());

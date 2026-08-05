@@ -7,6 +7,16 @@
 //! suite. Whatever is proven for ML-DSA-65 is proven for 44 and 87, under the same test
 //! names, and no level can quietly end up with less coverage than the others.
 
+// TODO: add the Wycheproof ML-DSA vectors (github.com/C2SP/wycheproof, testvectors_v1).
+// Vendor the JSON files with their source commit noted in a comment, like PROVENANCE.md
+// does for the submodule, and check that accept/reject matches each case's "result"
+// field, per level. Start with the verify files (mldsa_{44,65,87}_verify_test.json):
+// their bad signatures hit our length checks and the C's canonicality checks, where a
+// bug would matter for consensus. The sign vectors are also worth running through this
+// wrapper: they cover our Rust-side prefix building (0x00 || ctxlen || ctx), which
+// upstream's own Wycheproof runs never touch. The `wycheproof` crate has no ML-DSA
+// support, so parse the JSON directly.
+
 /// Defines the full suite for one parameter set.
 ///
 /// The layout arguments describe the FIPS 204 signature encoding, which is
@@ -25,9 +35,11 @@ macro_rules! level_tests {
         pk_prefix = $pk_prefix:expr,
         pk_suffix = $pk_suffix:expr,
         kats = $kats:expr,
+        kat_hashes = $kat_hashes:expr,
     ) => {
         mod $module {
             use mysten_mldsa_native_rs::{Error, MAX_CONTEXT_LENGTH, RND_LENGTH, SEED_LENGTH};
+            use sha2::Digest as _;
             use $api::{
                 Signature, SigningKey, SigningKeySeed, VerifyingKey, PUBLIC_KEY_LENGTH,
                 SIGNATURE_LENGTH,
@@ -55,6 +67,12 @@ macro_rules! level_tests {
             /// upstream re-pin. For a scheme the network reaches consensus on, that silent
             /// change is a chain split.
             const KATS: [([u8; 8], [u8; 4], [u8; 8], [u8; 4]); 3] = $kats;
+
+            /// SHA-256 of the full `(pk, sig)` for the same three cases. The fragments
+            /// above keep a mismatch readable in test output; these cover every byte in
+            /// between, so after a submodule re-pin, `cargo test` alone proves the
+            /// outputs did not change.
+            const KAT_HASHES: [(&str, &str); 3] = $kat_hashes;
 
             /// `(seed, msg_byte, msg_len, ctx_byte, ctx_len, rnd)`, the same for every level
             /// so all three are pinned under identical conditions. The cases cover what
@@ -123,6 +141,17 @@ macro_rules! level_tests {
                         sig[SIGNATURE_LENGTH - 4..],
                         *sig_tail,
                         "KAT {i}: signature tail — the wire format changed"
+                    );
+                    let (pk_sha256, sig_sha256) = KAT_HASHES[i];
+                    assert_eq!(
+                        hex::encode(sha2::Sha256::digest(pk)),
+                        pk_sha256,
+                        "KAT {i}: full public key diverged"
+                    );
+                    assert_eq!(
+                        hex::encode(sha2::Sha256::digest(sig)),
+                        sig_sha256,
+                        "KAT {i}: full signature diverged"
                     );
                 }
             }
@@ -368,6 +397,20 @@ level_tests!(
             [0x0e, 0x13, 0x17, 0x1b],
         ),
     ],
+    kat_hashes = [
+        (
+            "83ee80fcbcaf4872ed023e55cb10d7a2b4f1336a182115ea9c000f7449a7a9b0",
+            "fc3b57f04d4702bca59c145179b052fcbf47c1985bdc6079887721a800239b3e",
+        ),
+        (
+            "fda6ad37a2ab2ae563455cc73b3d263e13fc889914d975127dfbb3a07f274a1d",
+            "451654a6e990370fb0f5922c179eb08621abb31290f788449d95a4f625a5375a",
+        ),
+        (
+            "db0229df233110413da2c2031249e0a28300b68245b20668e723d11c127acb51",
+            "29e7403be757a7fea1760db9117cf06c52b7a169000772539ff0ce2eda31cc3a",
+        ),
+    ],
 );
 
 #[cfg(feature = "mldsa44")]
@@ -403,6 +446,20 @@ level_tests!(
             [0x0a, 0x13, 0x1c, 0x27],
         ),
     ],
+    kat_hashes = [
+        (
+            "bc7f72c940225e3998067ebef1d7cd2cad938de8f70b34c515a81d9efacac204",
+            "607f5ce8db0430ab6c6e39769cd2c81c67011313bcd7eceb0d4342092bde5ba6",
+        ),
+        (
+            "6e66c2c3c57116351798517f8d7c8d86c6ab57e12236799f00b869ae043a2da3",
+            "35dd2bf272b000aa5d6364c920947b72e9c01a38bd8b09671345e24f042df9c1",
+        ),
+        (
+            "4e4e2671157fa6d6c734bc952fde72c13ae6aa132a9b01eb215c17b6fd65567a",
+            "d0cdf388a660fca25351649d2c22ac196b69533f4df7a9cf0ac3828e8154aeb3",
+        ),
+    ],
 );
 
 #[cfg(feature = "mldsa87")]
@@ -436,6 +493,20 @@ level_tests!(
             [0xdd, 0xa3, 0x79, 0xaf],
             [0x19, 0x47, 0xaa, 0xe3, 0x30, 0x22, 0x62, 0x51],
             [0x20, 0x2a, 0x34, 0x3f],
+        ),
+    ],
+    kat_hashes = [
+        (
+            "ce2acc0495fd8ba20b7cafb87baba23e0c4285988a7c11a0b32defd26d7d35b1",
+            "a02a18ae4b07a10e2d28987f2bc60ab4ed063001e8e2f0832c0c6a04165d85a7",
+        ),
+        (
+            "2f76b55d0c6c14d3d659b8097f7d9329807f8e6f6d89415b1f4d39c82eb6c51d",
+            "d3f7dc2e7445fcbceaf9b6fd32f697ab34cbea56c6d651c288f90b7ead8ac0da",
+        ),
+        (
+            "fe41be59383db6db20c8c4ef08ca0ef54a94735f9def3b900a1a78dca8d03780",
+            "d6d2909c3f4c8e6e24590b19c2895a3196fb140ea7edbb762e2fa52be8e12713",
         ),
     ],
 );

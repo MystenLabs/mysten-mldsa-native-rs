@@ -78,6 +78,9 @@
 //!
 //! [mldsa-native]: https://github.com/pq-code-package/mldsa-native
 
+// The runtime CPU probe the vendored C calls in native builds.
+#[cfg(feature = "native")]
+mod capability;
 mod level;
 mod sys;
 

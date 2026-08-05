@@ -1,5 +1,9 @@
 # mysten-mldsa-native-rs
 
+> [!WARNING]
+> This crate has not been audited and is not ready for production use. The API and the
+> pinned upstream commit may change without notice until a release is tagged.
+
 Minimal safe Rust wrapper around [mldsa-native]'s ML-DSA (FIPS 204) implementation -
 the CBMC-verified C90 code maintained by the Post-Quantum Cryptography Alliance, Linux Foundation.
 ML-DSA-65 is always compiled and re-exported at the crate root; ML-DSA-44 and ML-DSA-87 are
@@ -47,10 +51,10 @@ const SEED: &str = "010101010101010101010101010101010101010101010101010101010101
 let seed: [u8; SEED_LENGTH] = hex::decode(SEED).unwrap().try_into().unwrap();
 let msg = hex::decode(MSG).unwrap();
 
-let sk = SigningKeySeed::from(seed).expand();
+let (sk, vk) = SigningKeySeed::from(seed).expand();
 let rnd = [42u8; RND_LENGTH]; // draw fresh from the OS per signature in real use
 let sig = sk.sign(&msg, b"", &rnd).unwrap();
-assert!(sk.verifying_key().verify(&msg, b"", &sig).is_ok());
+assert!(vk.verify(&msg, b"", &sig).is_ok());
 ```
 
 The same example runs as the crate's doctest, so it cannot drift from the API.
@@ -183,7 +187,6 @@ no build-time code generation, no entropy path in the C, zeroization, and a surf
 small enough to audit in one sitting.
 
 [mldsa-native]: https://github.com/pq-code-package/mldsa-native
-[mldsa-native-rs]: https://gitlab.com/nisec/qubip/mldsa-native-rs
 
 ## Development
 
