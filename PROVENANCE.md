@@ -5,8 +5,8 @@
 (Linux Foundation / Post-Quantum Cryptography Alliance), a CBMC- and
 valgrind-verified C90 implementation of ML-DSA (FIPS 204).
 
-- Pinned commit: `f10e8f117ca924500592e2cc22f4b5fa09e5fd0f` (2026-07-22,
-  `git describe`: `v1.0.0-beta2-137-gf10e8f11`)
+- Pinned commit: `c2128e953209a8b2420d521af63a77c481cac370` (2026-08-05,
+  `git describe`: `v1.0.0-beta2-161-gc2128e95`)
 - License: Apache-2.0 OR ISC OR MIT (see `deps/mldsa-native/LICENSE`)
 - Local modifications: **none.** The submodule is consumed exactly as pinned;
   all configuration happens through `MLD_CONFIG_*` defines in `build.rs`. Any
