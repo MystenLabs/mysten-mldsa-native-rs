@@ -21,14 +21,16 @@ jobs:
   license-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
       - run: scripts/license_check.sh
 
   # The vendored C is consumed exactly as pinned; this guards the pin itself.
   provenance-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
       # Reads the gitlink from the tree, so no submodule checkout is needed.
       - name: submodule pin matches PROVENANCE.md
         run: |
@@ -47,11 +49,14 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           # build.rs compiles the C sources from the mldsa-native submodule
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
       - run: cargo test
       - run: cargo test --all-features
 
@@ -76,10 +81,13 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
       # cargo uses the toolchain pinned in rust-toolchain.toml, so the target must be
       # added to that toolchain. The action's `targets:` input would install it into
       # `stable`, which cargo never uses here.
@@ -100,10 +108,13 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
       - run: cargo test --release --all-features
       # The C library (libmldsa65.a) must contain no AVX2 at all, i.e. no ymm
       # registers; only the assembly library may. The nonzero check on the assembly
@@ -122,20 +133,25 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
         with:
+          toolchain: stable
           components: clippy
       - run: cargo xclippy -D warnings
 
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
           components: rustfmt
       - run: cargo fmt --all --check
 
@@ -144,17 +160,22 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
       - run: cargo doc --no-deps --all-features
 
   cargo-deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # pin@v2.1.1
         with:
           command: check advisories licenses bans sources
 
@@ -166,10 +187,12 @@ jobs:
       CFLAGS: -fsanitize=address -g
       ASAN_OPTIONS: detect_leaks=1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
         with:
+          toolchain: nightly
           components: rust-src
       - run: cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all-features
