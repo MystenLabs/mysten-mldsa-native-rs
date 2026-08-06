@@ -29,7 +29,9 @@ jobs:
           submodules: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
 
       - name: Generate documentation
         run: cargo doc --no-deps --all-features

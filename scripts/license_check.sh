@@ -11,7 +11,7 @@ TOPLEVEL="${DIR}/../"
 for i in $(find "$TOPLEVEL" -path "$TOPLEVEL/target" -prune -o -iname "*.rs" -print) 
 do
   echo "Checking $i"
-  CNT=$(head -n3 "$i" | grep -oEe '// (Copyright \(c\) 2022, Mysten Labs, Inc.|SPDX-License-Identifier: Apache-2.0)' | wc -l)
+  CNT=$(head -n3 "$i" | grep -oEe '// (Copyright \(c\), Mysten Labs, Inc.|SPDX-License-Identifier: Apache-2.0)' | wc -l)
   if [ "$CNT" -lt 2 ]
   then
      echo "File $i has an incorrect license header"
