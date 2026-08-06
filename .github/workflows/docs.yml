@@ -1,0 +1,47 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**.rs"
+      - "Cargo.toml"
+      - "build.rs"
+      - "deps/mldsa-native"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+# The deploy step pushes to the gh-pages branch, so this workflow needs write
+# access; everything else in this repo's CI runs read-only.
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    name: Generate crate documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # pin v4.1.1
+        with:
+          # build.rs compiles the C sources from the mldsa-native submodule
+          submodules: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate documentation
+        run: cargo doc --no-deps --all-features
+
+    
+      - name: Add the docs index redirect
+        run: echo '<meta http-equiv="refresh" content="0; url=mysten_mldsa_native_rs/index.html">' > target/doc/index.html
+
+      # Same layout as fastcrypto's gh-pages: docs under /docs
+      - name: Deploy documentation
+        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # pin v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./target/doc
+          destination_dir: docs
