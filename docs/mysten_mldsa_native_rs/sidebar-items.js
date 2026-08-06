@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_CONTEXT_LENGTH","PUBLIC_KEY_LENGTH","RND_LENGTH","SEED_LENGTH","SIGNATURE_LENGTH"],"enum":["Error"],"struct":["Signature","SigningKey","SigningKeySeed","VerifyingKey"]};
