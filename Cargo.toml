@@ -30,6 +30,11 @@ native = ["dep:cpufeatures"]
 
 [dependencies]
 zeroize = "1"
+
+# Only the two architectures with a native backend have anything to probe, and
+# cpufeatures refuses to compile elsewhere (wasm32 included). Elsewhere `native`
+# still resolves and falls back to the portable C, as build.rs already arranges.
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 cpufeatures = { version = "0.2", optional = true }
 
 [dev-dependencies]

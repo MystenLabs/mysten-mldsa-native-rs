@@ -80,6 +80,16 @@ signature bytes and run under whichever backend is compiled. On other architectu
 and on toolchains the assembly does not support (MSVC), the feature falls back to the
 portable C with a build warning.
 
+The portable C also builds for `wasm32-unknown-unknown`, which has no C library: the
+build compiles freestanding and puts a declaration-only `<string.h>` from
+`src/wasm32-freestanding` on the include path, the only libc header mldsa-native
+touches. The `memcpy`/`memset` symbols come from Rust's `compiler_builtins`, so no C
+runtime is linked and the resulting module has no imports. It needs a clang with the
+WebAssembly backend (Apple's does not have one; Homebrew's `llvm` and Ubuntu's `clang`
+do), for example `CC=/opt/homebrew/opt/llvm/bin/clang cargo build --target
+wasm32-unknown-unknown`. Outputs match the native backends byte for byte; the CI
+`wasm` job links the test binaries to keep the symbol story honest.
+
 ### Backend selection
 
 How a build decides what runs. Everything above the probe is settled by `build.rs` at

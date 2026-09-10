@@ -96,6 +96,27 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
       - run: cargo check --target ${{ matrix.target }} --all-features
 
+  # wasm32-unknown-unknown has no C library, so build.rs compiles the C freestanding
+  # and provides the required <string.h> declarations through src/wasm32-freestanding.
+  # --no-run still links the test binaries, so this catches unresolved mem* symbols.
+  wasm:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
+      - run: rustup target add wasm32-unknown-unknown
+      - run: sudo apt-get update && sudo apt-get install -y clang
+      - run: cargo test --no-run --target wasm32-unknown-unknown
+      # `native` has nothing to offer wasm; this leg keeps its portable-C fallback honest.
+      - run: cargo test --no-run --target wasm32-unknown-unknown --all-features
+
   # Everything else in CI builds at opt-level 0. This job tests the optimized build,
   # where optimizer bugs would show up - and where the compiler would emit AVX2 into
   # the C if the containment rule ever broke, so the objdump check runs here too.
