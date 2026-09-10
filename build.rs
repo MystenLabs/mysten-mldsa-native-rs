@@ -44,6 +44,9 @@
 //!   that no backend got selected and fails the compile.
 //! - Elsewhere (and under MSVC, which can neither assemble the GAS-syntax asm bundle nor
 //!   call the SysV-ABI kernels): the portable C builds with a cargo warning.
+//! - wasm32-unknown-unknown: portable C built freestanding because the target has no C library.
+//!   A minimal `<string.h>` shim satisfies mldsa-native's header dependency, with the `mem*`
+//!   implementations supplied by Rust's `compiler_builtins`.
 //!
 //! Outputs are identical across backends; the pinned seed->key and fixed-rnd signing
 //! tests prove it.
@@ -108,6 +111,18 @@ fn main() {
         .define("MLD_CONFIG_INTERNAL_API_QUALIFIER", "static")
         .std("c99");
 
+    // wasm32-unknown-unknown has no C library. Build the portable backend
+    // freestanding and provide the small set of libc declarations it needs
+    // through src/wasm32-freestanding. The corresponding mem* symbols are
+    // supplied by Rust's compiler_builtins at link time.
+    let freestanding_include = manifest_dir.join("src/wasm32-freestanding");
+    if target_arch == "wasm32" {
+        build
+            .flag("-ffreestanding")
+            .flag("-isystem")
+            .flag(freestanding_include.to_str().unwrap());
+    }
+
     // Native builds go through a thin per-architecture wrapper that routes upstream's
     // capability question to the Rust probe (src/capability.rs); everything else compiles
     // the upstream single-compilation-unit directly. Both architectures need the probe,
@@ -166,6 +181,7 @@ fn main() {
         "src/native_dispatch.h",
         "src/single_level_x86_64.c",
         "src/single_level_aarch64.c",
+        "src/wasm32-freestanding/string.h",
     ] {
         println!("cargo:rerun-if-changed={}", manifest_dir.join(f).display());
     }
