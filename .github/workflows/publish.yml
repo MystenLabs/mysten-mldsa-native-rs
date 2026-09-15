@@ -1,0 +1,97 @@
+# Publishes the crate to crates.io whenever a version bump lands on main
+name: publish crate
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Cargo.toml'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: short
+
+# Needed to create the tag and the release.
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          ref: main
+          persist-credentials: false
+          # `cargo publish` builds the package to verify it, and build.rs compiles
+          # the C sources from the submodule. The packaged tarball ships them too.
+          submodules: true
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package=mysten-mldsa-native-rs
+          commit="$(git rev-parse HEAD)"
+          version="$(cargo metadata --format-version 1 --no-deps \
+            | jq --arg name "$package" --exit-status -r \
+                '.packages[] | select(.name == $name) | .version')"
+          tag="v${version}"
+          echo "${package} ${version} at ${commit}"
+
+          if git ls-remote --tags origin | grep -q "refs/tags/${tag}$"; then
+            echo "Tag ${tag} already exists; skipping tag creation"
+          else
+            echo "Creating tag ${tag}"
+            gh api "repos/${{ github.repository }}/git/refs" \
+              --method POST \
+              -f ref="refs/tags/${tag}" \
+              -f sha="${commit}"
+          fi
+
+          # The crate does not exist before its first publish, hence `// []`.
+          published="$(curl --fail --silent --show-error --location \
+            --header "User-Agent: MystenLabs/${package} publish workflow" \
+            "https://crates.io/api/v1/crates/${package}" \
+            | jq -r '.versions // [] | .[].num' || true)"
+
+          if grep --line-regexp --quiet --fixed-strings "${version}" <<< "${published}"; then
+            echo "${package} ${version} is already on crates.io; skipping publish"
+          else
+            # Uploads that fail after the index step can leave crates.io briefly
+            # inconsistent, so retry with a pause rather than failing the run.
+            attempts=6
+            for attempt in $(seq 1 "${attempts}"); do
+              if cargo publish --token "${CARGO_REGISTRY_TOKEN}"; then
+                break
+              fi
+              if [[ "${attempt}" == "${attempts}" ]]; then
+                exit 1
+              fi
+              echo "Publishing failed; retrying in 30 seconds"
+              sleep 30
+            done
+          fi
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; skipping release creation"
+          else
+            echo "Creating release ${tag}"
+            gh release create "${tag}" \
+              --title "${tag}" \
+              --generate-notes \
+              --target "${commit}"
+          fi
