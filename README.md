@@ -59,7 +59,8 @@ The same example runs as the crate's doctest, so it cannot drift from the API.
 
 ## Building
 
-The C sources are a git submodule (see `PROVENANCE.md` for the pinned commit):
+The C sources are a git submodule (see `PROVENANCE.md` for the pinned commit and
+`VERIFICATION.md` for our re-run of upstream's proofs and tests on it):
 
 ```bash
 git clone --recursive <repo-url>

@@ -12,6 +12,8 @@ valgrind-verified C90 implementation of ML-DSA (FIPS 204).
   pinned; all configuration happens through `MLD_CONFIG_*` defines in
   `build.rs`. Any future patch requirement must instead be reported (and fixed)
   upstream.
+- **Verification:** upstream's proofs and tests re-run on this commit, see
+  `VERIFICATION.md`.
 
 This is upstream's first stable release. It is numbered `v2.0.0` rather than
 `v1.0.0` to line up with the sister project `mlkem-native`. Therefore, the jump
