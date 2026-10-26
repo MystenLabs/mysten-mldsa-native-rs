@@ -7,10 +7,6 @@ use mysten_mldsa_native_rs::{
 };
 use sha2::{Digest, Sha256};
 
-// TODO: add the Wycheproof ML-DSA-65 vectors (github.com/C2SP/wycheproof,
-// testvectors_v1). Vendor the JSON files with their source commit because
-// the `wycheproof` crate has no ML-DSA support, so parse the JSON directly.
-
 // ML-DSA-65 signature layout (FIPS 204 / mldsa-native params.h)
 const CTILDE_BYTES: usize = 48;
 const Z_BYTES: usize = 5 * 640;
