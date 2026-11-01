@@ -39,6 +39,8 @@ cpufeatures = { version = "0.2", optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 wycheproof = "0.7"
 
