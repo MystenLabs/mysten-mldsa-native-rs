@@ -47,6 +47,13 @@ run is a second run with a newer CBMC; it reports the same 210 proofs successful
 An earlier pair of macOS runs on 2026-10-22 reached the same results; they were superseded by
 this single run so that one log covers the host.
 
+### HOL Light completeness
+
+There is an upstream issue where the HOL Light runner can report a proof as successful even if
+it did not actually finish (pq-code-package/mldsa-native#1426). To make sure this didn't happen
+in our runs, we checked that every proof produced a `Running time:` entry in the logs. All
+proofs did: 19/19 for x86_64 and 22/22 for aarch64.
+
 ## Published logs
 
 The full logs are too large to commit. Redacted copies (home directory paths shortened, nothing
@@ -69,7 +76,8 @@ shasum -a 256 *.log.gz
 
 This reproduces upstream's proofs and tests on the commit in our dependency tree. The Rust wrapper,
 its `MLD_CONFIG_*` choices in `build.rs`, and everything above it are outside that scope. They get
-functional testing only, through this crate's test suite and the fastcrypto-pq vectors, which is
+functional testing only, through this crate's test suite (including the Wycheproof vectors and the
+mutation-driven vectors in `tests/vectors/forged`) and the fastcrypto-pq vectors, which is
 not a formal guarantee. `SOUNDNESS.md` in upstream lists what the proofs assume. Two residual gaps at this tag: the constant-time property of the `rej_uniform_eta{2,4}`
 samplers is tested by valgrind but not proved (upstream's proof landed after v2.0.0), and the
 x86_64 eta samplers on upstream `main` differ from v2.0.0 by one `vzeroupper`.
