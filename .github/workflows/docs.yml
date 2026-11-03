@@ -25,6 +25,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # pin v4.1.1
         with:
+          persist-credentials: false
           # build.rs compiles the C sources from the mldsa-native submodule
           submodules: true
 
@@ -34,7 +35,7 @@ jobs:
           toolchain: stable
 
       - name: Generate documentation
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --locked --no-deps --all-features
 
     
       - name: Add the docs index redirect

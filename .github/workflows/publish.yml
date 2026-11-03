@@ -1,4 +1,13 @@
-# Publishes the crate to crates.io whenever a version bump lands on main
+# Publishes the crate to crates.io whenever a version bump lands on main.
+#
+# Two jobs on purpose. `verify` compiles the package, which runs build.rs, the C
+# compiler and the `cc` crate; it holds no secrets and is read-only. `publish`
+# compiles nothing: it packages the same commit with --no-verify, checks that the
+# tarball matches the one `verify` hashed before anything ran, and uploads it.
+# The crates.io token is a secret of the `crates-io` GitHub environment, which is
+# restricted to main, and only the upload step sees it. Cargo.lock is committed
+# and every cargo call runs --locked, so the build-time dependencies are the
+# reviewed ones.
 name: publish crate
 
 on:
@@ -9,6 +18,11 @@ on:
       - 'Cargo.toml'
   workflow_dispatch:
 
+# Two runs for the same version must not race the upload or the tag.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
@@ -16,82 +30,180 @@ env:
   RUSTUP_MAX_RETRIES: 10
   RUST_BACKTRACE: short
 
-# Needed to create the tag and the release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  publish:
-    name: Publish to crates.io
+  verify:
+    name: Verify the package builds
+    # workflow_dispatch can be started from any branch; only main is published.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    outputs:
+      crate_sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
-          # `cargo publish` builds the package to verify it, and build.rs compiles
-          # the C sources from the submodule. The packaged tarball ships them too.
+          # build.rs compiles the C sources from the submodule.
           submodules: true
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
         with:
           toolchain: stable
 
-      - name: Publish
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
+      # --no-verify packages without compiling, so the hash is taken before any
+      # build script could touch the tree or the tarball.
+      - name: Package and hash
+        id: package
         run: |
           set -euo pipefail
+          cargo package --locked --no-verify
+          sha256="$(sha256sum target/package/*.crate | cut -d' ' -f1)"
+          echo "crate sha256: ${sha256}"
+          echo "sha256=${sha256}" >> "$GITHUB_OUTPUT"
 
+      # Builds the crate from the extracted tarball, which is where build.rs, the
+      # C compiler and the `cc` crate run. The tarball is re-hashed afterwards so
+      # a build script that rewrote the tree or the archive fails the job here.
+      - name: Verify the package builds
+        env:
+          EXPECTED: ${{ steps.package.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          cargo package --locked
+          actual="$(sha256sum target/package/*.crate | cut -d' ' -f1)"
+          echo "after build: ${actual}"
+          test "${actual}" = "${EXPECTED}"
+      - run: cargo test --locked
+      - run: cargo test --locked --all-features
+
+  publish:
+    name: Publish to crates.io
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Holds CARGO_REGISTRY_TOKEN; deployment to it is restricted to main in the
+    # repository settings, so a workflow edited on another branch cannot read it.
+    environment: crates-io
+    # No build script or dependency code runs in this job, so neither token is
+    # ever in reach of third-party code.
+    permissions:
+      contents: write # tag and release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          # The packaged tarball ships the C sources from the submodule.
+          submodules: true
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # pin@master
+        with:
+          toolchain: stable
+
+      - name: Read the version
+        id: version
+        run: |
+          set -euo pipefail
           package=mysten-mldsa-native-rs
-          commit="$(git rev-parse HEAD)"
-          version="$(cargo metadata --format-version 1 --no-deps \
+          version="$(cargo metadata --format-version 1 --no-deps --locked \
             | jq --arg name "$package" --exit-status -r \
                 '.packages[] | select(.name == $name) | .version')"
-          tag="v${version}"
-          echo "${package} ${version} at ${commit}"
+          echo "${package} ${version} at ${GITHUB_SHA}"
+          echo "package=${package}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
 
-          if git ls-remote --tags origin | grep -q "refs/tags/${tag}$"; then
-            echo "Tag ${tag} already exists; skipping tag creation"
-          else
-            echo "Creating tag ${tag}"
-            gh api "repos/${{ github.repository }}/git/refs" \
-              --method POST \
-              -f ref="refs/tags/${tag}" \
-              -f sha="${commit}"
-          fi
+      # `cargo publish` below packages again from this same checkout rather than
+      # uploading this archive. cargo's packaging is reproducible and nothing
+      # modifies the checkout in between, so a match here carries over to the
+      # upload.
+      - name: Compare with the verified package
+        env:
+          EXPECTED: ${{ needs.verify.outputs.crate_sha256 }}
+        run: |
+          set -euo pipefail
+          cargo package --locked --no-verify
+          actual="$(sha256sum target/package/*.crate | cut -d' ' -f1)"
+          echo "verified: ${EXPECTED}"
+          echo "packaged: ${actual}"
+          test -n "${EXPECTED}"
+          test "${actual}" = "${EXPECTED}"
 
+      - name: Check crates.io
+        id: published
+        env:
+          PACKAGE: ${{ steps.version.outputs.package }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
           # The crate does not exist before its first publish, hence `// []`.
           published="$(curl --fail --silent --show-error --location \
-            --header "User-Agent: MystenLabs/${package} publish workflow" \
-            "https://crates.io/api/v1/crates/${package}" \
+            --header "User-Agent: MystenLabs/${PACKAGE} publish workflow" \
+            "https://crates.io/api/v1/crates/${PACKAGE}" \
             | jq -r '.versions // [] | .[].num' || true)"
-
-          if grep --line-regexp --quiet --fixed-strings "${version}" <<< "${published}"; then
-            echo "${package} ${version} is already on crates.io; skipping publish"
+          if grep --line-regexp --quiet --fixed-strings "${VERSION}" <<< "${published}"; then
+            echo "${PACKAGE} ${VERSION} is already on crates.io; skipping publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            # Uploads that fail after the index step can leave crates.io briefly
-            # inconsistent, so retry with a pause rather than failing the run.
-            attempts=6
-            for attempt in $(seq 1 "${attempts}"); do
-              if cargo publish --token "${CARGO_REGISTRY_TOKEN}"; then
-                break
-              fi
-              if [[ "${attempt}" == "${attempts}" ]]; then
-                exit 1
-              fi
-              echo "Publishing failed; retrying in 30 seconds"
-              sleep 30
-            done
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-          if gh release view "${tag}" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists; skipping release creation"
+      # --no-verify skips the build that `verify` already did. The token reaches
+      # cargo through the environment only; on argv it would be readable from /proc.
+      - name: Upload the package
+        if: steps.published.outputs.skip == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Uploads that fail after the index step can leave crates.io briefly
+          # inconsistent, so retry with a pause rather than failing the run.
+          attempts=6
+          for attempt in $(seq 1 "${attempts}"); do
+            if cargo publish --no-verify --locked; then
+              break
+            fi
+            if [[ "${attempt}" == "${attempts}" ]]; then
+              exit 1
+            fi
+            echo "Publishing failed; retrying in 30 seconds"
+            sleep 30
+          done
+
+      # Tagged only once the version is on crates.io, so a tag never claims a
+      # release that did not happen. An existing tag must point at this commit.
+      - name: Create the tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          existing="$(git ls-remote --tags origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}" \
+            | awk -v peeled="refs/tags/${TAG}^{}" '$2 == peeled { p = $1 } $2 != peeled { s = $1 } END { print (p != "" ? p : s) }')"
+          if [[ -n "${existing}" ]]; then
+            echo "Tag ${TAG} already exists at ${existing}"
+            test "${existing}" = "${GITHUB_SHA}"
           else
-            echo "Creating release ${tag}"
-            gh release create "${tag}" \
-              --title "${tag}" \
+            echo "Creating tag ${TAG}"
+            gh api "repos/${{ github.repository }}/git/refs" \
+              --method POST \
+              -f ref="refs/tags/${TAG}" \
+              -f sha="${GITHUB_SHA}"
+          fi
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; skipping release creation"
+          else
+            echo "Creating release ${TAG}"
+            gh release create "${TAG}" \
+              --title "${TAG}" \
               --generate-notes \
-              --target "${commit}"
+              --target "${GITHUB_SHA}"
           fi
