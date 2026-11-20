@@ -56,3 +56,62 @@ int PQCP_MLDSA_NATIVE_MLDSA65_verify(
     const uint8_t *ctx,
     size_t ctxlen,
     const uint8_t pk[1952]);
+
+/* The optional parameter sets, checked the same way when their feature is on. */
+#if defined(MLD_BUILD_LEVEL_44)
+typedef char mld_assert_pk_len_44[(MLDSA44_PUBLICKEYBYTES == 1312) ? 1 : -1];
+typedef char mld_assert_sk_len_44[(MLDSA44_SECRETKEYBYTES == 2560) ? 1 : -1];
+typedef char mld_assert_sig_len_44[(MLDSA44_BYTES == 2420) ? 1 : -1];
+
+int PQCP_MLDSA_NATIVE_MLDSA44_keypair_internal(
+    uint8_t pk[1312],
+    uint8_t sk[2560],
+    const uint8_t seed[32]);
+
+int PQCP_MLDSA_NATIVE_MLDSA44_signature_internal(
+    uint8_t sig[2420],
+    const uint8_t *m,
+    size_t mlen,
+    const uint8_t *pre,
+    size_t prelen,
+    const uint8_t rnd[32],
+    const uint8_t sk[2560],
+    int externalmu);
+
+int PQCP_MLDSA_NATIVE_MLDSA44_verify(
+    const uint8_t sig[2420],
+    const uint8_t *m,
+    size_t mlen,
+    const uint8_t *ctx,
+    size_t ctxlen,
+    const uint8_t pk[1312]);
+#endif /* MLD_BUILD_LEVEL_44 */
+
+#if defined(MLD_BUILD_LEVEL_87)
+typedef char mld_assert_pk_len_87[(MLDSA87_PUBLICKEYBYTES == 2592) ? 1 : -1];
+typedef char mld_assert_sk_len_87[(MLDSA87_SECRETKEYBYTES == 4896) ? 1 : -1];
+typedef char mld_assert_sig_len_87[(MLDSA87_BYTES == 4627) ? 1 : -1];
+
+int PQCP_MLDSA_NATIVE_MLDSA87_keypair_internal(
+    uint8_t pk[2592],
+    uint8_t sk[4896],
+    const uint8_t seed[32]);
+
+int PQCP_MLDSA_NATIVE_MLDSA87_signature_internal(
+    uint8_t sig[4627],
+    const uint8_t *m,
+    size_t mlen,
+    const uint8_t *pre,
+    size_t prelen,
+    const uint8_t rnd[32],
+    const uint8_t sk[4896],
+    int externalmu);
+
+int PQCP_MLDSA_NATIVE_MLDSA87_verify(
+    const uint8_t sig[4627],
+    const uint8_t *m,
+    size_t mlen,
+    const uint8_t *ctx,
+    size_t ctxlen,
+    const uint8_t pk[2592]);
+#endif /* MLD_BUILD_LEVEL_87 */

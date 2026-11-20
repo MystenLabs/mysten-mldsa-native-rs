@@ -1,3 +1,5 @@
 [toolchain]
 channel = "1.92"
-components = ["rustfmt", "clippy"]
+# rustfmt and clippy are needed by CI (GitHub runners install rustup with the minimal
+# profile); rust-analyzer keeps editors on a version matching this channel.
+components = ["rustfmt", "clippy", "rust-analyzer"]

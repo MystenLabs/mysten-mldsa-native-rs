@@ -63,6 +63,14 @@
 //! The code is compiled as C99 to match upstream's CI. MSVC ignores the C99 flag, which is
 //! harmless because upstream keeps the code C90-compatible.
 //!
+//! The optional `mldsa44` / `mldsa87` features add those parameter sets through
+//! `src/multilevel.c`, which follows upstream's multilevel monobuild shape: one translation
+//! unit that includes the implementation once per level, with ML-DSA-65 carrying the shared
+//! FIPS202 code so the extra levels only add their own. It composes with `native`, since a
+//! single assembly unit serves every compiled level, and it takes over the probe injection
+//! the single-level shims do otherwise. abi_check.c compiles on its own in that case,
+//! because its size assertions need one fixed parameter set.
+//!
 //! The way this build drives the vendored C follows AWS-LC; configure the C through
 //! `MLD_CONFIG_*` defines rather than patching it, replace the capability hook with
 //! our own CPU check, and compile the C without arch flags so vector code stays inside the
@@ -74,6 +82,7 @@ fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let src = manifest_dir.join("deps/mldsa-native/mldsa");
     let abi_check = manifest_dir.join("src/abi_check.c");
+    let multilevel_shim = manifest_dir.join("src/multilevel.c");
 
     if !src.join("mldsa_native.c").exists() {
         panic!(
@@ -83,6 +92,9 @@ fn main() {
     }
 
     let native = std::env::var_os("CARGO_FEATURE_NATIVE").is_some();
+    let level44 = std::env::var_os("CARGO_FEATURE_MLDSA44").is_some();
+    let level87 = std::env::var_os("CARGO_FEATURE_MLDSA87").is_some();
+    let multilevel = level44 || level87;
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_endian = std::env::var("CARGO_CFG_TARGET_ENDIAN").unwrap_or_default();
@@ -116,30 +128,68 @@ fn main() {
     // through src/wasm32-freestanding. The corresponding mem* symbols are
     // supplied by Rust's compiler_builtins at link time.
     let freestanding_include = manifest_dir.join("src/wasm32-freestanding");
-    if target_arch == "wasm32" {
-        build
-            .flag("-ffreestanding")
-            .flag("-isystem")
-            .flag(freestanding_include.to_str().unwrap());
-    }
+    let freestanding = |build: &mut cc::Build| {
+        if target_arch == "wasm32" {
+            build
+                .flag("-ffreestanding")
+                .flag("-isystem")
+                .flag(freestanding_include.to_str().unwrap());
+        }
+    };
+    freestanding(&mut build);
 
-    // Native builds go through a thin per-architecture wrapper that routes upstream's
-    // capability question to the Rust probe (src/capability.rs); everything else compiles
-    // the upstream single-compilation-unit directly. Both architectures need the probe,
-    // for different reasons: on x86_64 the AVX2
-    // arithmetic backend is not baseline, and on aarch64 NEON is but the ARMv8.4-A FEAT_SHA3
-    // Keccak kernels are not (Apple clang defines __ARM_FEATURE_SHA3 by default, so they get
-    // compiled in and would SIGILL on a Neoverse N1 / Cortex-A72 class CPU).
-    if native_x86_64 {
-        build.file(manifest_dir.join("src/single_level_x86_64.c"));
-    } else if native_aarch64 {
-        build.file(manifest_dir.join("src/single_level_aarch64.c"));
+    if multilevel {
+        // The multilevel shim names the parameter sets itself and injects the same dispatch
+        // header the single-level shims use, so it stands in for both of them.
+        build.file(&multilevel_shim);
+        if level44 {
+            build.define("MLD_BUILD_LEVEL_44", None);
+        }
+        if level87 {
+            build.define("MLD_BUILD_LEVEL_87", None);
+        }
+        if !level44 {
+            // The shared pass compiles the helpers of every level, and one of them
+            // (mld_polyw1_pack_88) has ML-DSA-44 as its only caller. It is `static` here,
+            // so without that level the compiler drops it and warns that it is unused.
+            build.flag_if_supported("-Wno-unused-function");
+        }
+        // abi_check.c needs one fixed parameter set for its size assertions, so it compiles
+        // on its own here. The level flags are passed along so it checks the optional
+        // levels' sizes and prototypes too.
+        let mut checks = cc::Build::new();
+        checks
+            .file(&abi_check)
+            .include(&src)
+            .define("MLD_CONFIG_PARAMETER_SET", "65")
+            .std("c99");
+        freestanding(&mut checks);
+        if level44 {
+            checks.define("MLD_BUILD_LEVEL_44", None);
+        }
+        if level87 {
+            checks.define("MLD_BUILD_LEVEL_87", None);
+        }
+        checks.compile("mldsa65_abi_check");
     } else {
-        build.file(src.join("mldsa_native.c"));
+        // Native builds go through a thin per-architecture wrapper that routes upstream's
+        // capability question to the Rust probe (src/capability.rs); everything else
+        // compiles the upstream single-compilation-unit directly. Both architectures need
+        // the probe, for different reasons: on x86_64 the AVX2 arithmetic backend is not
+        // baseline, and on aarch64 NEON is but the ARMv8.4-A FEAT_SHA3 Keccak kernels are
+        // not (Apple clang defines __ARM_FEATURE_SHA3 by default, so they get compiled in
+        // and would SIGILL on a Neoverse N1 / Cortex-A72 class CPU).
+        if native_x86_64 {
+            build.file(manifest_dir.join("src/single_level_x86_64.c"));
+        } else if native_aarch64 {
+            build.file(manifest_dir.join("src/single_level_aarch64.c"));
+        } else {
+            build.file(src.join("mldsa_native.c"));
+        }
+        build
+            .file(&abi_check)
+            .define("MLD_CONFIG_PARAMETER_SET", "65");
     }
-    build
-        .file(&abi_check)
-        .define("MLD_CONFIG_PARAMETER_SET", "65");
 
     if native_enabled {
         build
@@ -151,8 +201,8 @@ fn main() {
         if native_x86_64 {
             // Enables the AVX2 backend without letting the compiler itself emit AVX2; see
             // the module comment. MLD_BUILD_X86_64_DISPATCH marks builds carrying the
-            // dispatch machinery: single_level_x86_64.c asserts it, and a multilevel
-            // shim would gate its native_dispatch.h include on it.
+            // dispatch machinery: single_level_x86_64.c and multilevel.c both assert it
+            // and gate their native_dispatch.h include on it.
             build
                 .define("MLD_SYS_X86_64_AVX2", None)
                 .define("MLD_BUILD_X86_64_DISPATCH", None);
@@ -163,8 +213,15 @@ fn main() {
         asm.file(src.join("mldsa_native_asm.S"))
             .include(&src)
             .define("MLD_CONFIG_USE_NATIVE_BACKEND_ARITH", None)
-            .define("MLD_CONFIG_USE_NATIVE_BACKEND_FIPS202", None)
-            .define("MLD_CONFIG_PARAMETER_SET", "65");
+            .define("MLD_CONFIG_USE_NATIVE_BACKEND_FIPS202", None);
+        if multilevel {
+            // Must match src/multilevel.c: shared asm kernels take the level-free base
+            // prefix and the machinery appends the parameter set to level-specific ones.
+            asm.define("MLD_CONFIG_MULTILEVEL_WITH_SHARED", None)
+                .define("MLD_CONFIG_NAMESPACE_PREFIX", "PQCP_MLDSA_NATIVE_MLDSA");
+        } else {
+            asm.define("MLD_CONFIG_PARAMETER_SET", "65");
+        }
         if native_x86_64 {
             // Same backend switch as the C side: hand-written mnemonics need no -mavx2,
             // but the kernels' preprocessor guards need the backend to be selected.
@@ -177,6 +234,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", src.display());
     println!("cargo:rerun-if-changed={}", abi_check.display());
+    println!("cargo:rerun-if-changed={}", multilevel_shim.display());
     for f in [
         "src/native_dispatch.h",
         "src/single_level_x86_64.c",

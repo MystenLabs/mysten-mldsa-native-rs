@@ -19,6 +19,10 @@ every stage, so the record is two runs that cover each other.
 The Linux CBMC run is the one of record, since it uses the toolchain upstream pins. The macOS CBMC
 run is a second run with a newer CBMC; it reports the same 210 proofs successful.
 
+The CBMC stage was run for ML-DSA-65 only (`PARAM=65`, the script's default). The optional
+ML-DSA-44 and ML-DSA-87 levels (`mldsa44` / `mldsa87` features) are covered by our conformance and
+ct runs and by upstream's own CBMC CI, but not yet by a CBMC re-run of ours.
+
 ## Runs
 
 ### Linux x86_64, 2026-10-22

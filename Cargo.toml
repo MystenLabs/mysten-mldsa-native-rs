@@ -27,6 +27,13 @@ include = [
 # FEAT_SHA3 Keccak kernels on aarch64. The probe is Rust (src/capability.rs, using
 # cpufeatures); see build.rs for how AVX2 is kept out of compiler-generated code.
 native = ["dep:cpufeatures"]
+# Additionally compile the ML-DSA-44 / ML-DSA-87 parameter sets alongside ML-DSA-65
+# (upstream's multilevel monobuild) and expose their per-level Rust modules. ML-DSA-65 is
+# always on; the levels are not wire-compatible with each other, so picking one is a
+# protocol decision. Orthogonal to `native`: the assembly backends cover every compiled
+# level from one assembly unit.
+mldsa44 = []
+mldsa87 = []
 
 [dependencies]
 zeroize = "1"
