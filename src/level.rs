@@ -1,4 +1,4 @@
-// Copyright (c) 2022, Mysten Labs, Inc.
+// Copyright (c), Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 //! The API for one parameter set, written once and instantiated per level.
@@ -64,7 +64,8 @@ macro_rules! define_level {
             /// ML-DSA.KeyGen_internal (FIPS 204 Algorithm 6).
             ///
             /// Both keys fall out of the same expansion, so getting them together is free.
-            /// The expansion itself is not: it costs about as much as producing a signature.
+            /// The expansion itself is not: it costs one keygen (tens of microseconds,
+            /// depending on the level and the backend).
             /// Callers that sign more than once should hold on to the expanded key rather
             /// than expanding the seed again each time.
             pub fn expand(&self) -> (SigningKey, VerifyingKey) {

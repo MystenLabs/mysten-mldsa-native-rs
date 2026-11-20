@@ -21,14 +21,16 @@ jobs:
   license-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
       - run: scripts/license_check.sh
 
   # The vendored C is consumed exactly as pinned; this guards the pin itself.
   provenance-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
       # Reads the gitlink from the tree, so no submodule checkout is needed.
       - name: submodule pin matches PROVENANCE.md
         run: |
@@ -47,13 +49,41 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           # build.rs compiles the C sources from the mldsa-native submodule
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
-      - run: cargo test --all-features
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
+      - run: cargo test --locked
+      - run: cargo test --locked --all-features
+
+  # --all-features is one combination. src/multilevel.c compiles differently for every
+  # subset of the optional levels, with and without the assembly, so each subset runs.
+  level-features:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          - mldsa44
+          - mldsa87
+          - mldsa44,mldsa87
+          - native,mldsa44
+          - native,mldsa87
+      fail-fast: false
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
+      - run: cargo test --locked --features ${{ matrix.features }}
 
   # The test matrix builds only what its three runners run natively. These legs
   # cross-compile the remaining supported targets. Each one puts the same kernels
@@ -76,17 +106,41 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
       # cargo uses the toolchain pinned in rust-toolchain.toml, so the target must be
       # added to that toolchain. The action's `targets:` input would install it into
       # `stable`, which cargo never uses here.
       - run: rustup target add ${{ matrix.target }}
       - if: matrix.packages
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.packages }}
-      - run: cargo check --target ${{ matrix.target }} --all-features
+      - run: cargo check --locked --target ${{ matrix.target }} --all-features
+
+  # wasm32-unknown-unknown has no C library, so build.rs compiles the C freestanding
+  # and provides the required <string.h> declarations through src/wasm32-freestanding.
+  # --no-run still links the test binaries, so this catches unresolved mem* symbols.
+  wasm:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
+      - run: rustup target add wasm32-unknown-unknown
+      - run: sudo apt-get update && sudo apt-get install -y clang
+      - run: cargo test --locked --no-run --target wasm32-unknown-unknown
+      # `native` has nothing to offer wasm; this leg keeps its portable-C fallback honest.
+      - run: cargo test --locked --no-run --target wasm32-unknown-unknown --all-features
 
   # Everything else in CI builds at opt-level 0. This job tests the optimized build,
   # where optimizer bugs would show up - and where the compiler would emit AVX2 into
@@ -100,11 +154,14 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --release --all-features
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
+      - run: cargo test --locked --release --all-features
       # The C library (libmldsa65.a) must contain no AVX2 at all, i.e. no ymm
       # registers; only the assembly library may. The nonzero check on the assembly
       # proves the scan looked at the right files and the backend was really built.
@@ -122,20 +179,25 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
         with:
+          toolchain: stable
           components: clippy
       - run: cargo xclippy -D warnings
 
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
           components: rustfmt
       - run: cargo fmt --all --check
 
@@ -144,17 +206,22 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --no-deps --all-features
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
+      - run: cargo doc --locked --no-deps --all-features
 
   cargo-deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # pin@v2.1.1
         with:
           command: check advisories licenses bans sources
 
@@ -166,10 +233,12 @@ jobs:
       CFLAGS: -fsanitize=address -g
       ASAN_OPTIONS: detect_leaks=1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
+          persist-credentials: false
           submodules: true
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
         with:
+          toolchain: nightly
           components: rust-src
       - run: cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all-features

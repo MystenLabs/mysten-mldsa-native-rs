@@ -1,7 +1,8 @@
-// Copyright (c) 2022, Mysten Labs, Inc.
+// Copyright (c), Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Raw FFI bindings to mldsa-native's ML-DSA-65 `_internal` API (see `../PROVENANCE.md`).
+//! Raw FFI bindings to mldsa-native's ML-DSA `_internal` API (see `../PROVENANCE.md`):
+//! ML-DSA-65 always, ML-DSA-44 and ML-DSA-87 behind their cargo features.
 //!
 //! This module is intentionally a thin translation of the C API. It performs no
 //! validation or policy decisions: callers are responsible for providing

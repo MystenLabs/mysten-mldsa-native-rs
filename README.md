@@ -61,7 +61,8 @@ The same example runs as the crate's doctest, so it cannot drift from the API.
 
 ## Building
 
-The C sources are a git submodule (see `PROVENANCE.md` for the pinned commit):
+The C sources are a git submodule (see `PROVENANCE.md` for the pinned commit and
+`VERIFICATION.md` for our re-run of upstream's proofs and tests on it):
 
 ```bash
 git clone --recursive <repo-url>
@@ -82,6 +83,16 @@ signature bytes and run under whichever backend is compiled. On other architectu
 and on toolchains the assembly does not support (MSVC), the feature falls back to the
 portable C with a build warning.
 
+The portable C also builds for `wasm32-unknown-unknown`, which has no C library: the
+build compiles freestanding and puts a declaration-only `<string.h>` from
+`src/wasm32-freestanding` on the include path, the only libc header mldsa-native
+touches. The `memcpy`/`memset` symbols come from Rust's `compiler_builtins`, so no C
+runtime is linked and the resulting module has no imports. It needs a clang with the
+WebAssembly backend (Apple's does not have one; Homebrew's `llvm` and Ubuntu's `clang`
+do), for example `CC=/opt/homebrew/opt/llvm/bin/clang cargo build --target
+wasm32-unknown-unknown`. Outputs match the native backends byte for byte; the CI
+`wasm` job links the test binaries to keep the symbol story honest.
+
 ### Parameter sets
 
 ML-DSA-65 is always compiled and re-exported at the crate root, so `use
@@ -89,7 +100,8 @@ mysten_mldsa_native_rs::SigningKeySeed` keeps working unchanged. The `mldsa44` a
 `mldsa87` features additionally compile those parameter sets and expose them as
 `mysten_mldsa_native_rs::mldsa44` / `::mldsa87`, with the identical API — the levels are
 generated from one implementation (`src/level.rs`) and share one test suite, so a level
-cannot quietly lose coverage.
+cannot quietly lose coverage. The Wycheproof vectors run for every enabled level too. The
+mutation-driven vectors in `tests/forged.rs` exist for ML-DSA-65 only.
 
 ```bash
 cargo build                            # ML-DSA-65 only, portable C
@@ -158,14 +170,14 @@ measured against an otherwise identical hello-world, on aarch64 macOS with a pla
 
 | What is compiled | Adds |
 | --- | --- |
-| ML-DSA-65, portable C (the default) | +67 KB |
-| ML-DSA-65, assembly backends (`native`) | +85 KB |
-| all three levels, portable C | +152 KB |
-| all three levels, assembly backends | +187 KB |
+| ML-DSA-65, portable C (the default) | +69 KB |
+| ML-DSA-65, assembly backends (`native`) | +104 KB |
+| all three levels, portable C | +172 KB |
+| all three levels, assembly backends | +191 KB |
 
-Two things are worth reading off that table. The assembly backends cost about 18 KB
-for a roughly 2.5x speedup, which is the cheapest trade here by a wide margin. And the
-extra parameter sets cost less than doubling: ML-DSA-65 carries the shared FIPS202 and
+Two things are worth reading off that table. The assembly backends cost about 35 KB
+for a roughly 2.5x speedup, which is the cheapest trade here by a wide margin. And three
+levels cost less than three copies of one: ML-DSA-65 carries the shared FIPS202 and
 Keccak code, so ML-DSA-44 and ML-DSA-87 only bring their own polynomial arithmetic.
 
 For comparison, linking aws-lc-rs for ML-DSA-65 alone adds around 1.7 MB, because the
@@ -176,15 +188,6 @@ Reproducing the numbers is a matter of building the same workload twice, once wi
 crate and once without, and taking the difference. Turning on LTO and `strip` shrinks
 every binary by roughly 130 KB, but it leaves the figures above almost unchanged, since
 what it removes is mostly the Rust runtime rather than this crate's contribution.
-
-## Relation to mldsa-native-rs
-
-[mldsa-native-rs] wraps the same C library with a different contract: bindgen-generated bindings, all three parameter sets, RustCrypto
-`signature`-trait integration, an expanded-key (4032-byte) `SigningKey` with no seed
-retention, and the C's randomized API compiled in behind a `randombytes` link symbol.
-This crate exists for consumers that need the opposite trade-offs: seed-as-private-key,
-no build-time code generation, no entropy path in the C, zeroization, and a surface
-small enough to audit in one sitting.
 
 [mldsa-native]: https://github.com/pq-code-package/mldsa-native
 

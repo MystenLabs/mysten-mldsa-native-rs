@@ -1,4 +1,4 @@
-// Copyright (c) 2022, Mysten Labs, Inc.
+// Copyright (c), Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 //! Builds the vendored mldsa-native library (git submodule at `deps/mldsa-native`; see
@@ -44,6 +44,9 @@
 //!   that no backend got selected and fails the compile.
 //! - Elsewhere (and under MSVC, which can neither assemble the GAS-syntax asm bundle nor
 //!   call the SysV-ABI kernels): the portable C builds with a cargo warning.
+//! - wasm32-unknown-unknown: portable C built freestanding because the target has no C library.
+//!   A minimal `<string.h>` shim satisfies mldsa-native's header dependency, with the `mem*`
+//!   implementations supplied by Rust's `compiler_builtins`.
 //!
 //! Outputs are identical across backends; the pinned seed->key and fixed-rnd signing
 //! tests prove it.
@@ -120,6 +123,21 @@ fn main() {
         .define("MLD_CONFIG_INTERNAL_API_QUALIFIER", "static")
         .std("c99");
 
+    // wasm32-unknown-unknown has no C library. Build the portable backend
+    // freestanding and provide the small set of libc declarations it needs
+    // through src/wasm32-freestanding. The corresponding mem* symbols are
+    // supplied by Rust's compiler_builtins at link time.
+    let freestanding_include = manifest_dir.join("src/wasm32-freestanding");
+    let freestanding = |build: &mut cc::Build| {
+        if target_arch == "wasm32" {
+            build
+                .flag("-ffreestanding")
+                .flag("-isystem")
+                .flag(freestanding_include.to_str().unwrap());
+        }
+    };
+    freestanding(&mut build);
+
     if multilevel {
         // The multilevel shim names the parameter sets itself and injects the same dispatch
         // header the single-level shims use, so it stands in for both of them.
@@ -130,6 +148,12 @@ fn main() {
         if level87 {
             build.define("MLD_BUILD_LEVEL_87", None);
         }
+        if !level44 {
+            // The shared pass compiles the helpers of every level, and one of them
+            // (mld_polyw1_pack_88) has ML-DSA-44 as its only caller. It is `static` here,
+            // so without that level the compiler drops it and warns that it is unused.
+            build.flag_if_supported("-Wno-unused-function");
+        }
         // abi_check.c needs one fixed parameter set for its size assertions, so it compiles
         // on its own here. The level flags are passed along so it checks the optional
         // levels' sizes and prototypes too.
@@ -139,6 +163,7 @@ fn main() {
             .include(&src)
             .define("MLD_CONFIG_PARAMETER_SET", "65")
             .std("c99");
+        freestanding(&mut checks);
         if level44 {
             checks.define("MLD_BUILD_LEVEL_44", None);
         }
@@ -214,6 +239,7 @@ fn main() {
         "src/native_dispatch.h",
         "src/single_level_x86_64.c",
         "src/single_level_aarch64.c",
+        "src/wasm32-freestanding/string.h",
     ] {
         println!("cargo:rerun-if-changed={}", manifest_dir.join(f).display());
     }

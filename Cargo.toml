@@ -1,10 +1,10 @@
 [package]
 name = "mysten-mldsa-native-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Mysten Labs <build@mystenlabs.com>"]
-description = "Minimal safe Rust wrapper around the mldsa-native ML-DSA (FIPS 204) implementation"
+description = "Minimal safe Rust wrapper around the mldsa-native ML-DSA-65 (FIPS 204) implementation"
 readme = "README.md"
 repository = "https://github.com/MystenLabs/mysten-mldsa-native-rs"
 
@@ -37,11 +37,19 @@ mldsa87 = []
 
 [dependencies]
 zeroize = "1"
+
+# Only the two architectures with a native backend have anything to probe, and
+# cpufeatures refuses to compile elsewhere (wasm32 included). Elsewhere `native`
+# still resolves and falls back to the portable C, as build.rs already arranges.
+[target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
 cpufeatures = { version = "0.2", optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
+wycheproof = "0.7"
 
 [build-dependencies]
 cc = "1"

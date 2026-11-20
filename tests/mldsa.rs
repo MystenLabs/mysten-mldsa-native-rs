@@ -1,4 +1,4 @@
-// Copyright (c) 2022, Mysten Labs, Inc.
+// Copyright (c), Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 //! Public-API tests, run identically against every enabled parameter set.
@@ -6,16 +6,6 @@
 //! The levels come out of one implementation (see `src/level.rs`), so they get one test
 //! suite. Whatever is proven for ML-DSA-65 is proven for 44 and 87, under the same test
 //! names, and no level can quietly end up with less coverage than the others.
-
-// TODO: add the Wycheproof ML-DSA vectors (github.com/C2SP/wycheproof, testvectors_v1).
-// Vendor the JSON files with their source commit noted in a comment, like PROVENANCE.md
-// does for the submodule, and check that accept/reject matches each case's "result"
-// field, per level. Start with the verify files (mldsa_{44,65,87}_verify_test.json):
-// their bad signatures hit our length checks and the C's canonicality checks, where a
-// bug would matter for consensus. The sign vectors are also worth running through this
-// wrapper: they cover our Rust-side prefix building (0x00 || ctxlen || ctx), which
-// upstream's own Wycheproof runs never touch. The `wycheproof` crate has no ML-DSA
-// support, so parse the JSON directly.
 
 /// Defines the full suite for one parameter set.
 ///
