@@ -32,8 +32,10 @@ as the consumer can wrap these types and implement their own traits on top.
   size constants so that any ABI change on a future re-pin fails the C compile. No libclang is needed to build.
 - **Single compilation unit, minimal exports.** The C builds as upstream's monolithic
   unit with `MLD_CONFIG_INTERNAL_API_QUALIFIER=static`; only the public API symbols are
-  exported. The Cargo `links = "mldsa65"` key forbids any dependency graph containing a
-  second copy of the C library.
+  exported, plus the assembly kernels in a `native` build. All of them carry this crate's
+  own prefix (`MYSTEN_MLDSA_NATIVE_MLDSA65_`), so another copy of mldsa-native in the same
+  program cannot collide with this one. The Cargo `links = "mldsa65"` key keeps two
+  versions of this crate out of one dependency graph.
 - **Secret hygiene**: seed and expanded key are zeroized on drop; `SigningKey`'s `Debug`
   is redacted.
 - Runtime dependency: `zeroize`. Build dependency: `cc`.
@@ -89,7 +91,7 @@ runtime is linked and the resulting module has no imports. It needs a clang with
 WebAssembly backend (Apple's does not have one; Homebrew's `llvm` and Ubuntu's `clang`
 do), for example `CC=/opt/homebrew/opt/llvm/bin/clang cargo build --target
 wasm32-unknown-unknown`. Outputs match the native backends byte for byte; the CI
-`wasm` job links the test binaries to keep the symbol story honest.
+`wasm` job runs the test binaries under Node after checking that they import nothing.
 
 ### Backend selection
 
@@ -106,8 +108,8 @@ flowchart TD
     D -- "x86_64<br/>(non-MSVC)" --> X["portable C + AVX2 assembly<br/>compiled side by side"]
     D -- "other arch / MSVC" --> P2["portable C<br/>+ build warning"]
     X --> R{"runtime probe<br/>(cpuid + xgetbv)"}
-    R -- "AVX2 + OS support" --> AV["AVX2 kernels"]
-    R -- "no AVX2" --> P3["portable C"]
+    R -- "AVX2, POPCNT + OS support" --> AV["AVX2 kernels"]
+    R -- "otherwise" --> P3["portable C"]
 ```
 
 And where those choices sit in the SIMD landscape. Upstream mldsa-native ships

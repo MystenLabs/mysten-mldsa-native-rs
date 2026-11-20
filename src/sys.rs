@@ -41,7 +41,7 @@ extern "C" {
     ///
     /// `pk` and `sk` must point to `MLDSA65_PUBLICKEYBYTES`/`MLDSA65_SECRETKEYBYTES` bytes;
     /// `seed` to `MLDSA_SEEDBYTES` bytes. Returns 0 on success.
-    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA65_keypair_internal"]
+    #[link_name = "MYSTEN_MLDSA_NATIVE_MLDSA65_keypair_internal"]
     pub fn mldsa65_keypair_internal(pk: *mut u8, sk: *mut u8, seed: *const u8) -> i32;
 
     /// Implements FIPS 204 Algorithm 7 (ML-DSA.Sign_internal, `externalmu = 0`).
@@ -53,7 +53,7 @@ extern "C" {
     /// randomness for hedged signing. `sk` must point to `MLDSA65_SECRETKEYBYTES` bytes and is
     /// assumed valid (mldsa-native does not validate secret keys on the signing path). Returns 0
     /// on success; on any nonzero return the C has zeroized `sig`.
-    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA65_signature_internal"]
+    #[link_name = "MYSTEN_MLDSA_NATIVE_MLDSA65_signature_internal"]
     pub fn mldsa65_signature_internal(
         sig: *mut u8,
         m: *const u8,
@@ -71,7 +71,7 @@ extern "C" {
     /// may be NULL when `ctxlen` is 0 (upstream documents this). Verification needs no
     /// randomness. Returns 0 iff the signature verifies; nonzero also covers rejected encodings
     /// and `ctxlen > 255`, so callers must treat it as opaque failure, never classify it.
-    #[link_name = "PQCP_MLDSA_NATIVE_MLDSA65_verify"]
+    #[link_name = "MYSTEN_MLDSA_NATIVE_MLDSA65_verify"]
     pub fn mldsa65_verify(
         sig: *const u8,
         m: *const u8,
@@ -85,6 +85,8 @@ extern "C" {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
+
     // FIPS 204's pure-ML-DSA message prefix: domain separator 0x00, then the (empty) context's
     // length, then the (empty) context itself. See Algorithm 2/3 in FIPS 204.
     const EMPTY_CONTEXT_PREFIX: [u8; 2] = [0x00, 0x00];
@@ -164,5 +166,88 @@ mod tests {
         }
         assert_eq!(pk1, pk2);
         assert_eq!(sk1, sk2);
+    }
+
+    /// Seeds whose key generation takes the rare branch of the secret-vector sampler. One
+    /// secret polynomial gets fewer than 256 coefficients out of its first two SHAKE256
+    /// blocks, which happens for about one key in 13,000. A third block is then squeezed
+    /// and the portable C carries on from where the first pass stopped; in a native build
+    /// that is the assembly sampler's partial output. No other seed in this crate's tests
+    /// or vector files reaches that hand-over.
+    ///
+    /// `(seed prefix, zero-padded to 32 bytes; SHA-256 of the public key; SHA-256 of the
+    /// expanded secret key)`. The secret key is pinned too because the public key keeps
+    /// only the top bits of `t = A*s1 + s2`, so a wrong coefficient of `s2` rarely shows
+    /// in it. The seeds and public-key digests come from the November 2026 review of this
+    /// crate; OpenSSL 3.6 and 4.0 reproduce both columns.
+    const SAMPLER_CONTINUATION_SEEDS: [(&[u8], &str, &str); 7] = [
+        // s2[4]: 248 coefficients accepted in the first two blocks
+        (
+            &[0x4f, 0x27],
+            "a667a37ffa29ddea3de5973c9aae6bbe6ee302a9352df28bdb1630f37e46b8aa",
+            "e8ee217766704fda2eda58531809d1dcd12b0f69e140ed17d3db671a62cd5019",
+        ),
+        // s2[1]: 255
+        (
+            &[0x74, 0x39],
+            "42a4e7598462af6f7cd7b0865066dc263e59cfb5b14dd156515d188e293053f2",
+            "dd1c03eae7eb8f8e1bb08481aaaf3aabd048017008b6666658cbbb8e6d34e450",
+        ),
+        // s2[5]: 255
+        (
+            &[0xf6, 0x70],
+            "a4d79e841a0d9095b1432026d46376236f3513a2f548914e03a533e998b71aac",
+            "e7b1b50f7b0fc1dab211bb037187f98d7848416fdff84c4ac443e67df9106fd2",
+        ),
+        // s2[2]: 254
+        (
+            &[0xb5, 0x88],
+            "6ff0044518c6355178d3c78d85aad9707d65deb755a860fa25188f6d79936c1e",
+            "6cbf0ce9c45c0ac364cccf567e01d1b07a3f407ff044beaf118322575fb2a285",
+        ),
+        // s1[0]: 252
+        (
+            &[0x00, 0x35, 0xce],
+            "0b4941623a78faa83f75b7fd1f835f5a6309710a622f53f543464fbd54595629",
+            "10cc183b2f7cf7a1f4e1acb68ae32fcbc9129f33de1fe34d24b09d18c009f6e6",
+        ),
+        // s1[1]: 255
+        (
+            &[0x01, 0x89, 0x96],
+            "2f3d0f938f9abee07b85ee9f03a2e9eaffd59565c1395ba7ff8e35f8f6f73e54",
+            "fb7c43fc2602c8c5738c295cbd12356a7c202a4c4f7b696ad08f78d04ee95101",
+        ),
+        // s1[0]: 252
+        (
+            &[0x01, 0xd0, 0xa1],
+            "1710a7a83ba45828413605e98da2ebfa718085cb26dd8bbc5f795dfb9696edac",
+            "f02e5f98ed9f3a966eb33da4ddec0cca7665053ad5031dc7faf6218ef291722b",
+        ),
+    ];
+
+    #[test]
+    fn keygen_matches_reference_on_the_sampler_continuation_path() {
+        for (prefix, pk_sha256, sk_sha256) in SAMPLER_CONTINUATION_SEEDS {
+            let mut seed = [0u8; MLDSA_SEEDBYTES];
+            seed[..prefix.len()].copy_from_slice(prefix);
+            let mut pk = [0u8; MLDSA65_PUBLICKEYBYTES];
+            let mut sk = [0u8; MLDSA65_SECRETKEYBYTES];
+            let rc = unsafe {
+                mldsa65_keypair_internal(pk.as_mut_ptr(), sk.as_mut_ptr(), seed.as_ptr())
+            };
+            assert_eq!(rc, 0);
+
+            let label = hex::encode(prefix);
+            assert_eq!(
+                hex::encode(Sha256::digest(pk)),
+                pk_sha256,
+                "seed {label}: public key diverged"
+            );
+            assert_eq!(
+                hex::encode(Sha256::digest(sk)),
+                sk_sha256,
+                "seed {label}: secret key diverged"
+            );
+        }
     }
 }

@@ -34,12 +34,12 @@ typedef char mld_assert_pk_len[(MLDSA65_PUBLICKEYBYTES == 1952) ? 1 : -1];
 typedef char mld_assert_sk_len[(MLDSA65_SECRETKEYBYTES == 4032) ? 1 : -1];
 typedef char mld_assert_sig_len[(MLDSA65_BYTES == 3309) ? 1 : -1];
 
-int PQCP_MLDSA_NATIVE_MLDSA65_keypair_internal(
+int MYSTEN_MLDSA_NATIVE_MLDSA65_keypair_internal(
     uint8_t pk[1952],
     uint8_t sk[4032],
     const uint8_t seed[32]);
 
-int PQCP_MLDSA_NATIVE_MLDSA65_signature_internal(
+int MYSTEN_MLDSA_NATIVE_MLDSA65_signature_internal(
     uint8_t sig[3309],
     const uint8_t *m,
     size_t mlen,
@@ -49,7 +49,7 @@ int PQCP_MLDSA_NATIVE_MLDSA65_signature_internal(
     const uint8_t sk[4032],
     int externalmu);
 
-int PQCP_MLDSA_NATIVE_MLDSA65_verify(
+int MYSTEN_MLDSA_NATIVE_MLDSA65_verify(
     const uint8_t sig[3309],
     const uint8_t *m,
     size_t mlen,

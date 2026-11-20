@@ -52,6 +52,11 @@ jobs:
         with:
           toolchain: stable
 
+      # The vendored C goes into the package, so it must be what PROVENANCE.md
+      # documents: upstream's tagged commit, unmodified.
+      - name: Check the vendored sources
+        run: scripts/provenance_check.sh
+
       # --no-verify packages without compiling, so the hash is taken before any
       # build script could touch the tree or the tarball.
       - name: Package and hash

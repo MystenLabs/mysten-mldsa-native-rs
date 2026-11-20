@@ -26,25 +26,25 @@ jobs:
           persist-credentials: false
       - run: scripts/license_check.sh
 
-  # The vendored C is consumed exactly as pinned; this guards the pin itself.
+  # The vendored C is consumed exactly as pinned; this guards the pin itself: the gitlink,
+  # upstream's release tag and the checked-out tree must all be what PROVENANCE.md says.
   provenance-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
-      # Reads the gitlink from the tree, so no submodule checkout is needed.
-      - name: submodule pin matches PROVENANCE.md
-        run: |
-          pin=$(git ls-tree HEAD deps/mldsa-native | awk '{print $3}')
-          documented=$(grep -oE '\b[0-9a-f]{40}\b' PROVENANCE.md | head -1)
-          echo "gitlink:    $pin"
-          echo "documented: $documented"
-          test -n "$pin" && test "$pin" = "$documented"
+        with:
+          persist-credentials: false
+          # The script hashes the checked-out mldsa/ directory.
+          submodules: true
+      - run: scripts/provenance_check.sh
 
+  # ubuntu-24.04-arm is the only runner that executes the aarch64 Linux kernel set: NEON
+  # with the scalar Keccak kernels. macOS selects the FEAT_SHA3 Keccak kernels instead.
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
       fail-fast: false
     env:
       RUSTFLAGS: -D warnings
@@ -60,7 +60,26 @@ jobs:
       - run: cargo test --locked
       - run: cargo test --locked --all-features
 
-  # The test matrix builds only what its three runners run natively. These legs
+  # A native build whose CPU probe always answers "no", so every AVX2 wrapper takes its
+  # portable fallback branch. No runner reaches those branches otherwise, and a node whose
+  # CPU or hypervisor lacks AVX2 depends on them matching the kernels byte for byte.
+  # MYSTEN_MLDSA_EXPECT_PROBE fails a test if the probe answers anything else.
+  forced-fallback:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings --cfg mysten_mldsa_force_fallback
+      MYSTEN_MLDSA_EXPECT_PROBE: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # pin@master
+        with:
+          toolchain: stable
+      - run: cargo test --locked --all-features
+
+  # The test matrix builds only what its runners run natively. These legs
   # cross-compile the remaining supported targets. Each one puts the same kernels
   # through a different assembler and object format (GNU as/ELF, Apple as/Mach-O,
   # mingw/COFF), so every supported target at least compiles.
@@ -98,7 +117,9 @@ jobs:
 
   # wasm32-unknown-unknown has no C library, so build.rs compiles the C freestanding
   # and provides the required <string.h> declarations through src/wasm32-freestanding.
-  # --no-run still links the test binaries, so this catches unresolved mem* symbols.
+  # Linking alone proves little: rustc passes --allow-undefined, which turns a missing C
+  # symbol into an import. So the test binaries are run under Node, which first checks
+  # that they import nothing.
   wasm:
     runs-on: ubuntu-latest
     env:
@@ -116,6 +137,7 @@ jobs:
       - run: cargo test --locked --no-run --target wasm32-unknown-unknown
       # `native` has nothing to offer wasm; this leg keeps its portable-C fallback honest.
       - run: cargo test --locked --no-run --target wasm32-unknown-unknown --all-features
+      - run: node scripts/run_wasm_tests.mjs target/wasm32-unknown-unknown/debug/deps/*.wasm
 
   # Everything else in CI builds at opt-level 0. This job tests the optimized build,
   # where optimizer bugs would show up - and where the compiler would emit AVX2 into
@@ -123,11 +145,13 @@ jobs:
   release-test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: -D warnings
+      # Fails a test if the probe would keep the assembly kernels from running.
+      MYSTEN_MLDSA_EXPECT_PROBE: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pin@v4.4.0
         with:
@@ -141,7 +165,7 @@ jobs:
       # registers; only the assembly library may. The nonzero check on the assembly
       # proves the scan looked at the right files and the backend was really built.
       - name: AVX2 stays inside the probe-gated assembly
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.arch == 'X64'
         run: |
           c_lib=$(find target/release -name libmldsa65.a | head -1)
           asm_lib=$(find target/release -name libmldsa_native_asm.a | head -1)
@@ -216,4 +240,7 @@ jobs:
         with:
           toolchain: nightly
           components: rust-src
-      - run: cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu --all-features
+      # Default features first: that run instruments the portable C, which the assembly
+      # kernels (invisible to the sanitizer) replace in the second.
+      - run: cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu
+      - run: cargo +nightly test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --all-features

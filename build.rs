@@ -49,7 +49,8 @@
 //!   implementations supplied by Rust's `compiler_builtins`.
 //!
 //! Outputs are identical across backends; the pinned seed->key and fixed-rnd signing
-//! tests prove it.
+//! tests check it under every backend CI runs, including a native build whose probe is
+//! forced to answer "no" (`--cfg mysten_mldsa_force_fallback`, see src/capability.rs).
 //!
 //! `MLD_CONFIG_NO_RANDOMIZED_API` removes mldsa-native's API variants that obtain
 //! randomness themselves. This crate always passes randomness (seed / rnd) explicitly
@@ -57,8 +58,10 @@
 //! generator, and no `randombytes` symbol exists at link time.
 //!
 //! `MLD_CONFIG_INTERNAL_API_QUALIFIER=static` rides on the single-translation-unit shape:
-//! internal helpers become `static`, so only the public API is exported and a symbol
-//! collision with any other copy of mldsa-native under the default namespace is impossible.
+//! internal helpers become `static`, so the C exports only the public API. The assembly
+//! kernels cannot be `static`, so a native build exports those as well. Every exported name
+//! carries `NAMESPACE_PREFIX` below instead of upstream's default, so another copy of
+//! mldsa-native in the same link cannot collide with this one.
 //!
 //! The code is compiled as C99 to match upstream's CI. MSVC ignores the C99 flag, which is
 //! harmless because upstream keeps the code C90-compatible.
@@ -69,6 +72,11 @@
 //! probe-gated assembly.
 
 use std::path::PathBuf;
+
+/// Prefix of every symbol the C and the assembly export, in the shape of upstream's
+/// default `PQCP_MLDSA_NATIVE_MLDSA65`. `sys.rs` and `abi_check.c` spell the resulting
+/// names out, so change all three together.
+const NAMESPACE_PREFIX: &str = "MYSTEN_MLDSA_NATIVE_MLDSA65";
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -82,10 +90,14 @@ fn main() {
         );
     }
 
+    // Test-only switch read by src/capability.rs; declared here so rustc knows the name.
+    println!("cargo:rustc-check-cfg=cfg(mysten_mldsa_force_fallback)");
+
     let native = std::env::var_os("CARGO_FEATURE_NATIVE").is_some();
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_endian = std::env::var("CARGO_CFG_TARGET_ENDIAN").unwrap_or_default();
+    let target_vendor = std::env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
     // The asm bundle is GAS syntax and its x86_64 kernels use the SysV calling convention;
     // MSVC handles neither, so native there falls back to the portable C.
     let gnu_compatible_cc = target_env != "msvc";
@@ -109,7 +121,18 @@ fn main() {
         .include(&src)
         .define("MLD_CONFIG_NO_RANDOMIZED_API", None)
         .define("MLD_CONFIG_INTERNAL_API_QUALIFIER", "static")
+        .define("MLD_CONFIG_NAMESPACE_PREFIX", NAMESPACE_PREFIX)
         .std("c99");
+
+    // Signing keeps about 70 KiB of temporaries in one stack frame. A frame that large can
+    // step over a guard page without touching it, so ask for the stack probes that clang
+    // on Linux leaves off by default. Apple and Windows targets always probe.
+    if std::env::var_os("CARGO_CFG_UNIX").is_some()
+        && target_vendor != "apple"
+        && target_arch != "wasm32"
+    {
+        build.flag_if_supported("-fstack-clash-protection");
+    }
 
     // wasm32-unknown-unknown has no C library. Build the portable backend
     // freestanding and provide the small set of libc declarations it needs
@@ -159,11 +182,13 @@ fn main() {
         }
         // One assembly unit covers every level; for multilevel builds upstream compiles it
         // with MLD_CONFIG_MULTILEVEL_WITH_SHARED (see examples/monolithic_build_multilevel_native).
+        // It needs the same namespace prefix as the C that calls into it.
         let mut asm = cc::Build::new();
         asm.file(src.join("mldsa_native_asm.S"))
             .include(&src)
             .define("MLD_CONFIG_USE_NATIVE_BACKEND_ARITH", None)
             .define("MLD_CONFIG_USE_NATIVE_BACKEND_FIPS202", None)
+            .define("MLD_CONFIG_NAMESPACE_PREFIX", NAMESPACE_PREFIX)
             .define("MLD_CONFIG_PARAMETER_SET", "65");
         if native_x86_64 {
             // Same backend switch as the C side: hand-written mnemonics need no -mavx2,

@@ -341,18 +341,22 @@ fn seed_is_zeroized_on_drop() {
     // observing the wiped bytes afterwards is defined behavior (and AddressSanitizer-clean,
     // unlike reading a dead stack slot after scope exit).
     let mut seed = std::mem::ManuallyDrop::new(SigningKeySeed::from([13u8; SEED_LENGTH]));
-    let ptr = seed.as_bytes().as_ptr();
     assert_eq!(seed.as_bytes(), &[13u8; SEED_LENGTH]);
+    assert_eq!(std::mem::size_of::<SigningKeySeed>(), SEED_LENGTH);
 
+    // One pointer, taken from the unique borrow, both runs the destructor and reads the
+    // bytes back. A pointer taken from a shared borrow before `&mut *seed` existed would
+    // be invalidated by that reborrow.
+    let ptr: *mut SigningKeySeed = &mut *seed;
     unsafe {
-        std::ptr::drop_in_place(&mut *seed as *mut SigningKeySeed);
+        std::ptr::drop_in_place(ptr);
     }
 
     // The expanded SigningKey's buffers are wiped by its own Drop, but they are boxed and
     // returned to the allocator with the free, so only the inline seed is observable.
     unsafe {
         for i in 0..SEED_LENGTH {
-            assert_eq!(*ptr.add(i), 0, "seed byte {i} not zeroized");
+            assert_eq!(*ptr.cast::<u8>().add(i), 0, "seed byte {i} not zeroized");
         }
     }
 }

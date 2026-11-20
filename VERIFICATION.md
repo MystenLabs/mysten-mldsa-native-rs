@@ -5,7 +5,9 @@ What we ship: mldsa-native `v2.0.0`, commit `834a90d5e846ffa1e1611bd24e160bb2e9b
 
 Upstream's assurance rests on four CI jobs. We re-ran them ourselves on that commit with
 `scripts/verify-upstream.sh`, which clones upstream at the pin, refuses a dirty tree or a wrong
-origin, and runs the same stages with the same flags as upstream's workflows. No single host can run
+origin, and runs upstream's own test and proof commands. Two stages are narrower than upstream's CI:
+conformance runs four suites (functional tests, KATs, ACVP, Wycheproof), not all of `tests all`, and
+ct runs one compiler at one optimisation level where upstream runs a matrix. No single host can run
 every stage, so the record is two runs that cover each other.
 
 | Stage | What it establishes | Linux x86_64 | macOS arm64 |
@@ -79,8 +81,10 @@ its `MLD_CONFIG_*` choices in `build.rs`, and everything above it are outside th
 functional testing only, through this crate's test suite (including the Wycheproof vectors and the
 mutation-driven vectors in `tests/vectors/forged`) and the fastcrypto-pq vectors, which is
 not a formal guarantee. `SOUNDNESS.md` in upstream lists what the proofs assume. Two residual gaps at this tag: the constant-time property of the `rej_uniform_eta{2,4}`
-samplers is tested by valgrind but not proved (upstream's proof landed after v2.0.0), and the
-x86_64 eta samplers on upstream `main` differ from v2.0.0 by one `vzeroupper`.
+samplers is not proved (upstream's proof landed after v2.0.0), and valgrind tests it for their C
+version only, because upstream declassifies the input before calling the assembly version that a
+`native` build uses; and the x86_64 eta samplers on upstream `main` differ from v2.0.0 by one
+`vzeroupper`.
 
 ## Re-running
 

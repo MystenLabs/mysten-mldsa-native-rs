@@ -34,6 +34,10 @@ NIX=${NIX:-$(command -v nix >/dev/null && echo nix || echo none)}
 # The flake's cbmc shell does not build on macOS (z3's Python check aborts), so use host tools there.
 HOST_STAGES=${HOST_STAGES:-$([ "$(uname -s)" = Darwin ] && echo cbmc)}
 HOST_ARCH=$(uname -m | sed 's/arm64/aarch64/')
+# These settings may have arrived through the environment, and the stages would then inherit
+# them. Upstream's CBMC makefiles have a LOGDIR of their own (`LOGDIR ?= ...`): an inherited one
+# collects every proof's output in one directory, and `make veryclean` then deletes it.
+export -n PIN PARAM WORK LOGDIR STAGES REQUIRED JOBS NIX HOST_STAGES
 
 # These are interpolated into shell commands; accept only the expected shapes.
 case $PARAM in 44|65|87|ALL) ;; *) die "PARAM must be 44, 65, 87 or ALL, got '$PARAM'" ;; esac

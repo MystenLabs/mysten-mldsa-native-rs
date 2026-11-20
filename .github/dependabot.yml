@@ -10,7 +10,5 @@ updates:
     schedule:
       interval: "monthly"
 
-  - package-ecosystem: "gitsubmodule"
-    directory: "/"
-    schedule:
-      interval: "monthly"
+  # No "gitsubmodule" entry: it would propose the head of upstream's main, while
+  # PROVENANCE.md pins release tags and the provenance check rejects anything else.

@@ -34,8 +34,12 @@ zeroize = "1"
 # Only the two architectures with a native backend have anything to probe, and
 # cpufeatures refuses to compile elsewhere (wasm32 included). Elsewhere `native`
 # still resolves and falls back to the portable C, as build.rs already arranges.
+#
+# Keep the floor at 0.2.8 or later: older releases answer "avx2" without checking that
+# the OS saves the YMM registers, which src/capability.rs relies on. 0.2.17 is the
+# version this crate is tested with.
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
-cpufeatures = { version = "0.2", optional = true }
+cpufeatures = { version = "0.2.17", optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"
