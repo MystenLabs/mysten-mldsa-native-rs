@@ -35,7 +35,7 @@ zeroize = "1"
 # cpufeatures refuses to compile elsewhere (wasm32 included). Elsewhere `native`
 # still resolves and falls back to the portable C, as build.rs already arranges.
 [target.'cfg(any(target_arch = "x86_64", target_arch = "aarch64"))'.dependencies]
-cpufeatures = { version = "0.2", optional = true }
+cpufeatures = { version = "0.3", optional = true }
 
 [dev-dependencies]
 hex = "0.4.3"
